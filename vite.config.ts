@@ -16,6 +16,39 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+
+          if (id.includes('jspdf') || id.includes('html2canvas')) {
+            return 'pdf-tools';
+          }
+
+          if (id.includes('recharts')) {
+            return 'charts';
+          }
+
+          if (
+            id.includes('@radix-ui') ||
+            id.includes('cmdk') ||
+            id.includes('embla-carousel-react') ||
+            id.includes('vaul')
+          ) {
+            return 'ui-vendor';
+          }
+
+          if (id.includes('lucide-react') || id.includes('date-fns') || id.includes('sonner')) {
+            return 'app-vendor';
+          }
+
+          return 'vendor';
+        },
+      },
+    },
+  },
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],

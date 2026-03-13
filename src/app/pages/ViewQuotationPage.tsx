@@ -22,10 +22,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../components/ui/alert-dialog';
-import { ArrowLeft, Download, Share2, CheckCircle, Loader2, Pencil } from 'lucide-react';
+import { ArrowLeft, Download, Printer, Share2, CheckCircle, Loader2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
 import { PrintableQuotationDocument } from '../components/quotation/PrintableQuotationDocument';
 import { format } from 'date-fns';
 import { useIsMobile } from '../components/ui/use-mobile';
@@ -37,6 +35,7 @@ export default function ViewQuotationPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [sharePdfBlob, setSharePdfBlob] = useState<Blob | null>(null);
   const printRef = useRef<HTMLDivElement | null>(null);
   const isMobile = useIsMobile();
 
@@ -47,6 +46,32 @@ export default function ViewQuotationPage() {
       setSettings(settingsService.get());
     }
   }, [id]);
+
+  useEffect(() => {
+    if (!isMobile || !quotation || !settings) return;
+
+    let cancelled = false;
+
+    const prepareSharePdf = async () => {
+      try {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const pdfBlob = await generatePdfBlob();
+        if (!cancelled) {
+          setSharePdfBlob(pdfBlob);
+        }
+      } catch {
+        if (!cancelled) {
+          setSharePdfBlob(null);
+        }
+      }
+    };
+
+    prepareSharePdf();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isMobile, quotation, settings]);
 
   if (!quotation) {
     return (
@@ -68,20 +93,15 @@ export default function ViewQuotationPage() {
     const toastId = toast.loading('Exporting PDF...');
 
     try {
-      const element = printRef.current;
-      if (!element) {
-        throw new Error('Quotation template not found');
-      }
-
-      const canvas = await html2canvas(element, { scale: 2 });
-      const data = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('portrait', 'px', 'a4');
-      const imageProperties = pdf.getImageProperties(data);
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (imageProperties.height * pdfWidth) / imageProperties.width;
-
-      pdf.addImage(data, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`${quotation.quoteNumber}.pdf`);
+      const pdfBlob = await generatePdfBlob();
+      const url = URL.createObjectURL(pdfBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${quotation.quoteNumber}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
 
       toast.dismiss(toastId);
       toast.success('PDF export successful');
@@ -96,6 +116,11 @@ export default function ViewQuotationPage() {
   };
 
   const generatePdfBlob = async () => {
+    const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+      import('html2canvas'),
+      import('jspdf'),
+    ]);
+
     const element = printRef.current;
     if (!element) {
       throw new Error('Quotation template not found');
@@ -120,12 +145,13 @@ export default function ViewQuotationPage() {
       return;
     }
 
-    setLoading(true);
-    const toastId = toast.loading('Preparing PDF for sharing...');
-
     try {
-      const pdfBlob = await generatePdfBlob();
-      const file = new File([pdfBlob], `${quotation.quoteNumber}.pdf`, {
+      if (!sharePdfBlob) {
+        toast.info('PDF is still preparing. Tap share again in a moment.');
+        return;
+      }
+
+      const file = new File([sharePdfBlob], `${quotation.quoteNumber}.pdf`, {
         type: 'application/pdf',
       });
       const shareData = {
@@ -139,15 +165,56 @@ export default function ViewQuotationPage() {
       }
 
       await navigator.share(shareData);
-      toast.dismiss(toastId);
       toast.success('PDF ready to share');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to share PDF';
-      toast.dismiss(toastId);
       toast.error(message);
-    } finally {
-      setLoading(false);
     }
+  };
+
+  const handlePrintPDF = () => {
+    const element = printRef.current;
+    if (!element) {
+      toast.error('Quotation template not found');
+      return;
+    }
+
+    const printWindow = window.open('', '_blank', 'width=900,height=1200');
+    if (!printWindow) {
+      toast.error('Unable to open print window');
+      return;
+    }
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>${quotation.quoteNumber}</title>
+          <style>
+            body {
+              margin: 0;
+              padding: 24px;
+              background: #ffffff;
+              display: flex;
+              justify-content: center;
+            }
+            @media print {
+              body {
+                padding: 0;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          ${element.outerHTML}
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.onload = () => {
+      printWindow.print();
+    };
   };
 
   const handleStatusChange = (newStatus: Quotation['status']) => {
@@ -243,6 +310,12 @@ export default function ViewQuotationPage() {
             )}
             Export PDF
           </Button>
+          {!isMobile && (
+            <Button variant="outline" onClick={handlePrintPDF}>
+              <Printer className="h-4 w-4 mr-2" />
+              Print PDF
+            </Button>
+          )}
           {isMobile && quotation.customerPhone && (
             <Button variant="outline" onClick={handleShareWhatsApp}>
               <Share2 className="h-4 w-4 mr-2" />

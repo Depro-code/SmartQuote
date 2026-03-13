@@ -36,7 +36,6 @@ import { Textarea } from '../components/ui/textarea';
 import { Plus, Search, Edit, Trash2, AlertTriangle, Share2, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router';
-import html2canvas from 'html2canvas';
 import { useIsMobile } from '../components/ui/use-mobile';
 
 export default function ProductsPage() {
@@ -103,6 +102,8 @@ export default function ProductsPage() {
   };
 
   const generateProductCardBlob = async (product: Product) => {
+    const { default: html2canvas } = await import('html2canvas');
+
     setCardProduct(product);
     await waitForPreviewRender();
 
