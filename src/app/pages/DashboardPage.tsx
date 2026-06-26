@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { productsService, quotationsService } from '../lib/services';
-import { Package, AlertTriangle, FileText, TrendingUp } from 'lucide-react';
+import { customersService, productsService, quotationsService } from '../lib/services';
+import { Package, AlertTriangle, FileText, TrendingUp, Users } from 'lucide-react';
 import { Link } from 'react-router';
 
 export default function DashboardPage() {
   const [stats, setStats] = useState({
     totalProducts: 0,
+    totalCustomers: 0,
     lowStockCount: 0,
     quotationsThisMonth: 0,
     totalQuotations: 0,
@@ -15,12 +16,14 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const products = productsService.getAll();
+    const customers = customersService.getAll();
     const lowStock = productsService.getLowStock();
     const allQuotations = quotationsService.getAll();
     const monthQuotations = quotationsService.getThisMonth();
 
     setStats({
       totalProducts: products.length,
+      totalCustomers: customers.length,
       lowStockCount: lowStock.length,
       quotationsThisMonth: monthQuotations.length,
       totalQuotations: allQuotations.length,
@@ -43,6 +46,14 @@ export default function DashboardPage() {
       color: 'text-orange-600',
       bgColor: 'bg-orange-50',
       link: '/products',
+    },
+    {
+      title: 'Total Customers',
+      value: stats.totalCustomers,
+      icon: Users,
+      color: 'text-amber-700',
+      bgColor: 'bg-amber-50',
+      link: '/customers',
     },
     {
       title: 'Quotations This Month',
@@ -130,6 +141,18 @@ export default function DashboardPage() {
                 </div>
               </Link>
               <Link
+                to="/customers"
+                className="block p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-center">
+                  <Users className="h-5 w-5 text-amber-700 mr-3" />
+                  <div>
+                    <p className="font-medium text-gray-900">Manage Customers</p>
+                    <p className="text-sm text-gray-600">Save customer records for reuse</p>
+                  </div>
+                </div>
+              </Link>
+              <Link
                 to="/quotations/new"
                 className="block p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
               >
@@ -163,7 +186,7 @@ export default function DashboardPage() {
                 to="/settings"
                 className="inline-block text-blue-600 hover:underline text-sm"
               >
-                Configure settings →
+                Configure settings
               </Link>
             </CardContent>
           </Card>

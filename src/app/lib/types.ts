@@ -36,6 +36,18 @@ export interface Product {
   updatedAt: string;
 }
 
+export interface Customer {
+  id: string;
+  name: string;
+  company?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface QuotationItem {
   productId: string;
   nameSnapshot: string;
@@ -50,6 +62,7 @@ export type QuotationStatus = 'DRAFT' | 'SENT' | 'CONFIRMED' | 'CANCELLED';
 export interface Quotation {
   id: string;
   quoteNumber: string;
+  customerId?: string;
   customerName: string;
   customerPhone?: string;
   customerEmail?: string;

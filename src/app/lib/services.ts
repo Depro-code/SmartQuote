@@ -1,4 +1,4 @@
-import type { Settings, Product, Quotation, User } from './types';
+import type { Customer, Product, Quotation, Settings, User } from './types';
 
 // localStorage keys
 const KEYS = {
@@ -6,6 +6,7 @@ const KEYS = {
   CURRENT_USER: 'smartquote_current_user',
   SETTINGS: 'smartquote_settings',
   PRODUCTS: 'smartquote_products',
+  CUSTOMERS: 'smartquote_customers',
   QUOTATIONS: 'smartquote_quotations',
 };
 
@@ -89,7 +90,7 @@ const DEFAULT_SAMPLE_PRODUCTS: Product[] = [
   createSeedProduct('5', 'Complete delivery kit', 'AMC-DLK-005', 'Maternity', 'kit', 35000, 20, 5, 'Complete delivery kit for maternity and labor procedures.'),
   createSeedProduct('6', 'Minor surgical kit', 'AMC-MSK-006', 'Surgery', 'kit', 35000, 24, 6, 'Minor surgical instrument kit for routine interventions.'),
   createSeedProduct('7', 'Stainless steel dressing trolley', 'AMC-TRY-007', 'Furniture', 'unit', 100000, 10, 2, 'Mobile stainless steel trolley for dressing and procedure support.'),
-  createSeedProduct('8', 'Protected baby’s cots', 'AMC-COT-008', 'Pediatrics', 'unit', 100000, 10, 2, 'Protected baby cot for neonatal and pediatric ward use.'),
+  createSeedProduct('8', "Protected baby's cots", 'AMC-COT-008', 'Pediatrics', 'unit', 100000, 10, 2, 'Protected baby cot for neonatal and pediatric ward use.'),
   createSeedProduct('9', 'Autoclave', 'AMC-AUT-009', 'Sterilization', 'unit', 225000, 4, 1, 'Autoclave for sterilization of instruments and consumables.'),
   createSeedProduct('10', 'Electronic Footoscope', 'AMC-FOT-010', 'Diagnostics', 'unit', 75000, 8, 2, 'Electronic footoscope for specialized examination and care.'),
   createSeedProduct('11', 'Bedside cupboard with drawers', 'AMC-BCD-011', 'Furniture', 'unit', 95000, 12, 3, 'Bedside cupboard with storage drawers for patient rooms.'),
@@ -103,6 +104,68 @@ const DEFAULT_SAMPLE_PRODUCTS: Product[] = [
   createSeedProduct('19', 'Littmann stethoscope', 'AMC-STH-019', 'Diagnostics', 'unit', 22000, 14, 4, 'Littmann stethoscope for clinical auscultation.'),
   createSeedProduct('20', 'Stainless steel Otoscope', 'AMC-OTO-020', 'Diagnostics', 'unit', 55000, 10, 2, 'Stainless steel otoscope for ear examination.'),
   createSeedProduct('21', 'Iodine (surgical spirit) 500ml', 'AMC-IOD-021', 'Consumables', 'bottle', 1800, 200, 50, '500ml iodine surgical spirit for antiseptic preparation.'),
+];
+
+function createSeedCustomer(
+  id: string,
+  name: string,
+  company: string,
+  email: string,
+  phone: string,
+  address: string,
+  notes: string,
+): Customer {
+  const timestamp = new Date().toISOString();
+  return {
+    id,
+    name,
+    company,
+    email,
+    phone,
+    address,
+    notes,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+const DEFAULT_CUSTOMERS: Customer[] = [
+  createSeedCustomer(
+    '1',
+    'Sandra Mbah',
+    'Northwind Traders',
+    'sandra@northwind.example',
+    '+237 670 100 201',
+    'Commercial Avenue, Bamenda',
+    'Prefers quotations by WhatsApp before email follow-up.',
+  ),
+  createSeedCustomer(
+    '2',
+    'Emmanuel Tabe',
+    'Summit Holdings',
+    'emmanuel@summit.example',
+    '+237 679 220 145',
+    'Bonanjo, Douala',
+    'Usually asks for 14-day validity on quotations.',
+  ),
+  createSeedCustomer(
+    '3',
+    'Lydia Fon',
+    'Greenline Ventures',
+    'lydia@greenline.example',
+    '+237 655 410 330',
+    'Mile 3, Buea',
+    'Main contact for repeat orders and urgent requests.',
+  ),
+  createSeedCustomer(
+    '4',
+    'Patrick Ndzi',
+    'Nkambe Council',
+    'procurement@nkambecouncil.example',
+    '+237 681 907 500',
+    'Nkambe, North West Region',
+    'Procurement office contact for municipal purchases.',
+  ),
 ];
 
 function migrateLegacySettings(settings: Partial<Settings>): Partial<Settings> {
@@ -155,6 +218,16 @@ function initializeDefaults() {
   // Initialize empty quotations
   if (!localStorage.getItem(KEYS.QUOTATIONS)) {
     localStorage.setItem(KEYS.QUOTATIONS, JSON.stringify([]));
+  }
+
+  // Initialize customers
+  if (!localStorage.getItem(KEYS.CUSTOMERS)) {
+    localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(DEFAULT_CUSTOMERS));
+  } else {
+    const storedCustomers = JSON.parse(localStorage.getItem(KEYS.CUSTOMERS) || '[]') as Customer[];
+    if (storedCustomers.length === 0) {
+      localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(DEFAULT_CUSTOMERS));
+    }
   }
 }
 
@@ -293,6 +366,73 @@ export const productsService = {
   },
 };
 
+// Customers Service
+export const customersService = {
+  getAll: (): Customer[] => {
+    initializeDefaults();
+    return JSON.parse(localStorage.getItem(KEYS.CUSTOMERS) || '[]');
+  },
+
+  getById: (id: string): Customer | null => {
+    const customers = customersService.getAll();
+    return customers.find((customer) => customer.id === id) || null;
+  },
+
+  create: (customer: Omit<Customer, 'id' | 'createdAt' | 'updatedAt'>): Customer => {
+    const customers = customersService.getAll();
+    const now = new Date().toISOString();
+    const newCustomer: Customer = {
+      ...customer,
+      id: Date.now().toString(),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    customers.push(newCustomer);
+    localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(customers));
+    return newCustomer;
+  },
+
+  update: (id: string, updates: Partial<Customer>): Customer | null => {
+    const customers = customersService.getAll();
+    const index = customers.findIndex((customer) => customer.id === id);
+
+    if (index === -1) return null;
+
+    customers[index] = {
+      ...customers[index],
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+
+    localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(customers));
+    return customers[index];
+  },
+
+  delete: (id: string): boolean => {
+    const customers = customersService.getAll();
+    const filtered = customers.filter((customer) => customer.id !== id);
+
+    if (filtered.length === customers.length) return false;
+
+    localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(filtered));
+    return true;
+  },
+
+  search: (query: string): Customer[] => {
+    const customers = customersService.getAll();
+    const lowerQuery = query.toLowerCase();
+
+    return customers.filter(
+      (customer) =>
+        customer.name.toLowerCase().includes(lowerQuery) ||
+        customer.company?.toLowerCase().includes(lowerQuery) ||
+        customer.email?.toLowerCase().includes(lowerQuery) ||
+        customer.phone?.toLowerCase().includes(lowerQuery),
+    );
+  },
+};
+
 // Quotations Service
 export const quotationsService = {
   getAll: (): Quotation[] => {
@@ -359,6 +499,7 @@ export const quotationsService = {
       (q) =>
         q.quoteNumber.toLowerCase().includes(lowerQuery) ||
         q.customerName.toLowerCase().includes(lowerQuery) ||
+        q.customerPhone?.toLowerCase().includes(lowerQuery) ||
         q.customerEmail?.toLowerCase().includes(lowerQuery)
     );
   },

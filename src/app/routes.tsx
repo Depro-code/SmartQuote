@@ -5,10 +5,12 @@ import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import ProductsPage from './pages/ProductsPage';
 import NewProductPage from './pages/NewProductPage';
+import ProductDetailPage from './pages/ProductDetailPage';
 import QuotationsPage from './pages/QuotationsPage';
 import NewQuotationPage from './pages/NewQuotationPage';
 import ViewQuotationPage from './pages/ViewQuotationPage';
 import SettingsPage from './pages/SettingsPage';
+import CustomersPage from './pages/CustomersPage';
 
 export const router = createBrowserRouter([
   {
@@ -44,6 +46,22 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <NewProductPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/products/:id',
+    element: (
+      <ProtectedRoute>
+        <ProductDetailPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/customers',
+    element: (
+      <ProtectedRoute>
+        <CustomersPage />
       </ProtectedRoute>
     ),
   },

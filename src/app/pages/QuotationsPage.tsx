@@ -20,9 +20,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../components/ui/select';
-import { Plus, Search, Eye, Pencil } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Search, Eye, Pencil } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { format } from 'date-fns';
+
+const QUOTATIONS_PAGE_SIZE = 10;
 
 export default function QuotationsPage() {
   const navigate = useNavigate();
@@ -30,6 +32,7 @@ export default function QuotationsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [filteredQuotations, setFilteredQuotations] = useState<Quotation[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     loadQuotations();
@@ -49,10 +52,31 @@ export default function QuotationsPage() {
     setFilteredQuotations(filtered);
   }, [searchQuery, statusFilter, quotations]);
 
+  const totalCount = filteredQuotations.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / QUOTATIONS_PAGE_SIZE));
+  const from = totalCount === 0 ? 0 : (currentPage - 1) * QUOTATIONS_PAGE_SIZE + 1;
+  const to = Math.min(currentPage * QUOTATIONS_PAGE_SIZE, totalCount);
+  const paginatedQuotations = filteredQuotations.slice(
+    (currentPage - 1) * QUOTATIONS_PAGE_SIZE,
+    currentPage * QUOTATIONS_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter]);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, totalPages));
+  }, [totalPages]);
+
   const loadQuotations = () => {
-    setQuotations(quotationsService.getAll().sort((a, b) => 
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    ));
+    setQuotations(
+      quotationsService.getAll().sort((a, b) => {
+        if (a.status === 'CONFIRMED' && b.status !== 'CONFIRMED') return 1;
+        if (a.status !== 'CONFIRMED' && b.status === 'CONFIRMED') return -1;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }),
+    );
   };
 
   const formatCurrency = (amount: number) => {
@@ -80,26 +104,27 @@ export default function QuotationsPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex h-[calc(100svh-5rem)] min-h-[620px] flex-col overflow-hidden rounded-lg border border-border bg-card">
+        <div className="border-b border-border bg-card px-4 py-3 sm:px-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-3xl font-semibold text-gray-900">Quotations</h1>
-            <p className="text-gray-600 mt-1">Manage your quotations</p>
+            <h1 className="text-xl font-semibold text-foreground sm:text-2xl">Quotations</h1>
+            <p className="mt-1 text-sm text-muted-foreground">Manage your quotations</p>
           </div>
           <Button onClick={() => navigate('/quotations/new')}>
-            <Plus className="h-4 w-4 mr-2" />
+            <Plus className="h-4 w-4" />
             New Quotation
           </Button>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+        <div className="mt-3 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Search by quote number, customer..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              className="h-9 pl-10"
             />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -114,66 +139,73 @@ export default function QuotationsPage() {
               <SelectItem value="CANCELLED">Cancelled</SelectItem>
             </SelectContent>
           </Select>
+          <div className="flex h-9 items-center rounded-md border border-border bg-background px-3 text-xs text-muted-foreground">
+            Showing {totalCount} of {quotations.length}
+          </div>
+        </div>
         </div>
 
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Quote #</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Dates</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Total</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+        <div className="min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]">
+            <Table className="min-w-[980px] border-separate border-spacing-0">
+              <TableHeader className="sticky top-0 z-20 bg-card">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Quote #</TableHead>
+                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Customer</TableHead>
+                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Dates</TableHead>
+                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Items</TableHead>
+                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Total</TableHead>
+                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Status</TableHead>
+                  <TableHead className="border-b border-border px-4 py-3 text-right text-xs font-semibold uppercase text-muted-foreground">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredQuotations.length === 0 ? (
+                {paginatedQuotations.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-gray-500">
+                    <TableCell colSpan={7} className="h-[420px] text-center text-muted-foreground">
                       No quotations found
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredQuotations.map((quotation) => (
-                    <TableRow key={quotation.id}>
-                      <TableCell className="font-medium">{quotation.quoteNumber}</TableCell>
-                      <TableCell>
+                  paginatedQuotations.map((quotation) => (
+                    <TableRow key={quotation.id} className="group hover:bg-muted/40">
+                      <TableCell className="px-4 py-3 font-medium text-foreground">{quotation.quoteNumber}</TableCell>
+                      <TableCell className="px-4 py-3">
                         <div>
-                          <div className="font-medium">{quotation.customerName}</div>
+                          <div className="font-medium text-foreground">{quotation.customerName}</div>
                           {quotation.customerPhone && (
-                            <div className="text-sm text-gray-500">{quotation.customerPhone}</div>
+                            <div className="text-sm text-muted-foreground">{quotation.customerPhone}</div>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="px-4 py-3">
                         <div className="text-sm">
-                          <div className="font-medium text-slate-900">
+                          <div className="font-medium text-foreground">
                             Created: {format(new Date(quotation.createdAt), 'MMM dd, yyyy')}
                           </div>
-                          <div className="text-slate-500">
+                          <div className="text-muted-foreground">
                             Modified: {format(new Date(quotation.updatedAt), 'MMM dd, yyyy')}
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell>{quotation.items.length}</TableCell>
-                      <TableCell>{formatCurrency(quotation.grandTotal)}</TableCell>
-                      <TableCell>{getStatusBadge(quotation.status)}</TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="px-4 py-3">{quotation.items.length}</TableCell>
+                      <TableCell className="px-4 py-3 font-medium text-foreground">{formatCurrency(quotation.grandTotal)}</TableCell>
+                      <TableCell className="px-4 py-3">{getStatusBadge(quotation.status)}</TableCell>
+                      <TableCell className="px-4 py-3 text-right">
                         <div className="flex justify-end gap-1">
+                          {quotation.status !== 'CONFIRMED' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => navigate(`/quotations/${quotation.id}/edit`)}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
-                            size="sm"
-                            onClick={() => navigate(`/quotations/${quotation.id}/edit`)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
+                            size="icon"
+                            className="h-8 w-8"
                             onClick={() => navigate(`/quotations/${quotation.id}`)}
                           >
                             <Eye className="h-4 w-4" />
@@ -185,6 +217,35 @@ export default function QuotationsPage() {
                 )}
               </TableBody>
             </Table>
+          </div>
+
+        <div className="border-t border-border bg-card px-4 py-3 sm:px-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              Showing {from} to {to} of {totalCount} quotations
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                aria-label="Next page"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </div>

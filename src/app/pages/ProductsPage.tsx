@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { productsService, imageService } from '../lib/services';
 import type { Product } from '../lib/types';
@@ -33,10 +33,23 @@ import {
 } from '../components/ui/alert-dialog';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
-import { Plus, Search, Edit, Trash2, AlertTriangle, Share2, Download } from 'lucide-react';
+import {
+  Plus,
+  Search,
+  Edit,
+  Trash2,
+  AlertTriangle,
+  Share2,
+  Download,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router';
 import { useIsMobile } from '../components/ui/use-mobile';
+import { ProductShareCard } from '../components/product/ProductShareCard';
+
+const PRODUCTS_PAGE_SIZE = 10;
 
 export default function ProductsPage() {
   const navigate = useNavigate();
@@ -48,7 +61,17 @@ export default function ProductsPage() {
   const [deleteProductId, setDeleteProductId] = useState<string | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [cardProduct, setCardProduct] = useState<Product | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
   const cardRef = useRef<HTMLDivElement | null>(null);
+
+  const totalCount = filteredProducts.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PRODUCTS_PAGE_SIZE));
+  const from = totalCount === 0 ? 0 : (currentPage - 1) * PRODUCTS_PAGE_SIZE + 1;
+  const to = Math.min(currentPage * PRODUCTS_PAGE_SIZE, totalCount);
+  const paginatedProducts = filteredProducts.slice(
+    (currentPage - 1) * PRODUCTS_PAGE_SIZE,
+    currentPage * PRODUCTS_PAGE_SIZE,
+  );
 
   useEffect(() => {
     loadProducts();
@@ -61,6 +84,14 @@ export default function ProductsPage() {
       setFilteredProducts(products);
     }
   }, [searchQuery, products]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, totalPages));
+  }, [totalPages]);
 
   const loadProducts = () => {
     setProducts(productsService.getAll());
@@ -173,105 +204,135 @@ export default function ProductsPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-semibold text-gray-900">Products</h1>
-            <p className="text-gray-600 mt-1">Manage your inventory</p>
+      <div className="flex h-[calc(100svh-5rem)] min-h-[620px] flex-col overflow-hidden rounded-lg border border-border bg-card">
+        <div className="border-b border-border bg-card px-4 py-3 sm:px-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <h1 className="truncate text-xl font-semibold text-foreground sm:text-2xl">Products</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Manage inventory, stock levels, pricing, and product cards.
+            </p>
           </div>
-          <Button onClick={() => navigate('/products/new')}>
-            <Plus className="h-4 w-4 mr-2" />
+          <Button onClick={() => navigate('/products/new')} className="shrink-0">
+            <Plus className="h-4 w-4" />
             Add Product
           </Button>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative w-full sm:max-w-[420px]">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search products by name, SKU, or category..."
+              placeholder="Search name, SKU, or category..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              className="h-9 pl-10"
             />
           </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span className="rounded-md border border-border bg-background px-2.5 py-1">
+              Total: {products.length}
+            </span>
+            <span className="rounded-md border border-border bg-background px-2.5 py-1">
+              Showing: {totalCount}
+            </span>
+            <span className="rounded-md border border-border bg-background px-2.5 py-1">
+              Page {currentPage} of {totalPages}
+            </span>
+          </div>
+        </div>
         </div>
 
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Image</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Price</TableHead>
-                  <TableHead>Stock</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+        <div className="min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]">
+            <Table className="min-w-[980px] border-separate border-spacing-0">
+              <TableHeader className="sticky top-0 z-20 bg-card">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Image</TableHead>
+                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Name</TableHead>
+                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Category</TableHead>
+                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Price</TableHead>
+                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Stock</TableHead>
+                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Status</TableHead>
+                  <TableHead className="border-b border-border px-4 py-3 text-right text-xs font-semibold uppercase text-muted-foreground">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredProducts.length === 0 ? (
+                {paginatedProducts.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8 text-gray-500">
+                    <TableCell colSpan={7} className="h-[420px] text-center text-muted-foreground">
                       No products found
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredProducts.map((product) => {
+                  paginatedProducts.map((product) => {
+                    const isOutOfStock = product.quantityInStock <= 0;
                     const isLowStock =
-                      product.reorderLevel && product.quantityInStock <= product.reorderLevel;
+                      !isOutOfStock &&
+                      product.reorderLevel &&
+                      product.quantityInStock <= product.reorderLevel;
                     
                     return (
-                      <TableRow key={product.id}>
-                        <TableCell>
+                      <TableRow key={product.id} className="group hover:bg-muted/40">
+                        <TableCell className="px-4 py-3">
                           <img
                             src={product.imageUrl}
                             alt={product.name}
-                            className="h-12 w-12 rounded object-cover"
+                            className="h-12 w-12 rounded-md border border-border object-cover"
                           />
+                      </TableCell>
+                      <TableCell className="max-w-[420px] px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/products/${product.id}`)}
+                          className="block max-w-full truncate text-left font-medium text-primary hover:underline"
+                        >
+                          {product.name}
+                        </button>
+                      </TableCell>
+                        <TableCell className="px-4 py-3 text-muted-foreground">{product.category || '-'}</TableCell>
+                        <TableCell className="px-4 py-3 font-medium text-foreground">
+                          {formatCurrency(product.unitPrice)}
                         </TableCell>
-                        <TableCell className="font-medium">{product.name}</TableCell>
-                        <TableCell>{product.sku || '—'}</TableCell>
-                        <TableCell>{product.category || '—'}</TableCell>
-                        <TableCell>{formatCurrency(product.unitPrice)}</TableCell>
-                        <TableCell>
+                        <TableCell className="px-4 py-3">
                           <div className="flex items-center gap-2">
-                            <span>{product.quantityInStock}</span>
-                            {isLowStock && (
-                              <AlertTriangle className="h-4 w-4 text-orange-500" />
-                            )}
+                            <span className="font-medium text-foreground">{product.quantityInStock}</span>
+                            {isOutOfStock ? (
+                              <AlertTriangle className="h-4 w-4 text-destructive" />
+                            ) : isLowStock ? (
+                              <AlertTriangle className="h-4 w-4 text-warning" />
+                            ) : null}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="px-4 py-3">
                           <Badge variant={product.isActive ? 'default' : 'secondary'}>
                             {product.isActive ? 'Active' : 'Inactive'}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-2">
+                        <TableCell className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
                             <Button
                               variant="ghost"
-                              size="sm"
+                              size="icon"
+                              className="h-8 w-8"
                               onClick={() => handleShareOrDownload(product)}
                             >
                               {isMobile ? <Share2 className="h-4 w-4" /> : <Download className="h-4 w-4" />}
                             </Button>
                             <Button
                               variant="ghost"
-                              size="sm"
+                              size="icon"
+                              className="h-8 w-8"
                               onClick={() => handleEdit(product)}
                             >
                               <Edit className="h-4 w-4" />
                             </Button>
                             <Button
                               variant="ghost"
-                              size="sm"
+                              size="icon"
+                              className="h-8 w-8"
                               onClick={() => handleDelete(product.id)}
                             >
-                              <Trash2 className="h-4 w-4 text-red-600" />
+                              <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
                           </div>
                         </TableCell>
@@ -281,6 +342,35 @@ export default function ProductsPage() {
                 )}
               </TableBody>
             </Table>
+          </div>
+
+        <div className="border-t border-border bg-card px-4 py-3 sm:px-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              Showing {from} to {to} of {totalCount} products
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                aria-label="Next page"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -325,147 +415,6 @@ export default function ProductsPage() {
         )}
       </div>
     </DashboardLayout>
-  );
-}
-
-const productCardStyle: CSSProperties = {
-  width: '960px',
-  minHeight: '420px',
-  display: 'grid',
-  gridTemplateColumns: '360px 1fr',
-  background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 52%, #fdba74 100%)',
-  border: '2px solid #f59e0b',
-  borderRadius: '28px',
-  overflow: 'hidden',
-  color: '#111827',
-  fontFamily: 'Arial, Helvetica, sans-serif',
-};
-
-const ProductShareCard = forwardRef<
-  HTMLDivElement,
-  { product: Product; formatCurrency: (amount: number) => string }
->(function ProductShareCard({ product, formatCurrency }, ref) {
-  return (
-    <div ref={ref} style={productCardStyle}>
-      <div
-        style={{
-          background: '#fff7ed',
-          padding: '28px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderRight: '2px solid rgba(245, 158, 11, 0.35)',
-        }}
-      >
-        <img
-          src={product.imageUrl}
-          alt={product.name}
-          style={{
-            width: '100%',
-            height: '320px',
-            objectFit: 'cover',
-            borderRadius: '22px',
-            background: '#ffffff',
-            border: '1px solid rgba(251, 191, 36, 0.45)',
-          }}
-        />
-      </div>
-
-      <div
-        style={{
-          padding: '34px 36px',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-        }}
-      >
-        <div>
-          <p
-            style={{
-              margin: 0,
-              fontSize: '14px',
-              fontWeight: 700,
-              letterSpacing: '0.18em',
-              textTransform: 'uppercase',
-              color: '#92400e',
-            }}
-          >
-            Amen-Cam Product Card
-          </p>
-          <h2
-            style={{
-              margin: '14px 0 0',
-              fontSize: '36px',
-              lineHeight: 1.05,
-              fontWeight: 900,
-              color: '#111827',
-            }}
-          >
-            {product.name}
-          </h2>
-          <p
-            style={{
-              margin: '18px 0 0',
-              fontSize: '18px',
-              lineHeight: 1.6,
-              color: '#374151',
-            }}
-          >
-            {product.description || 'Professional medical supply item available from Amen-Cam.'}
-          </p>
-        </div>
-
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-            gap: '16px',
-          }}
-        >
-          <ProductMeta label="Price" value={formatCurrency(product.unitPrice)} />
-          <ProductMeta label="Unit" value={product.unit || 'unit'} />
-          <ProductMeta label="Category" value={product.category || 'General'} />
-          <ProductMeta label="SKU" value={product.sku || 'N/A'} />
-          <ProductMeta label="Stock" value={String(product.quantityInStock)} />
-          <ProductMeta label="Brand" value={product.brand || 'Amen-Cam'} />
-        </div>
-      </div>
-    </div>
-  );
-});
-
-function ProductMeta({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      style={{
-        borderRadius: '18px',
-        background: 'rgba(255, 255, 255, 0.62)',
-        padding: '14px 16px',
-      }}
-    >
-      <div
-        style={{
-          fontSize: '12px',
-          fontWeight: 700,
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
-          color: '#92400e',
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          marginTop: '6px',
-          fontSize: '20px',
-          fontWeight: 800,
-          color: '#111827',
-          lineHeight: 1.2,
-        }}
-      >
-        {value}
-      </div>
-    </div>
   );
 }
 
@@ -662,3 +611,4 @@ function EditProductDialog({
     </Dialog>
   );
 }
+

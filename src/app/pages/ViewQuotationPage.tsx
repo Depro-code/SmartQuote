@@ -25,6 +25,7 @@ import {
 import { ArrowLeft, Download, Printer, Share2, CheckCircle, Loader2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { PrintableQuotationDocument } from '../components/quotation/PrintableQuotationDocument';
+import { generateQuotationPDF, quotationPdfFilename } from '../lib/pdfGenerator';
 import { format } from 'date-fns';
 import { useIsMobile } from '../components/ui/use-mobile';
 
@@ -36,7 +37,7 @@ export default function ViewQuotationPage() {
   const [loading, setLoading] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [sharePdfBlob, setSharePdfBlob] = useState<Blob | null>(null);
-  const printRef = useRef<HTMLDivElement | null>(null);
+  const documentRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -52,10 +53,9 @@ export default function ViewQuotationPage() {
 
     let cancelled = false;
 
-    const prepareSharePdf = async () => {
+    const preparePdf = async () => {
       try {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        const pdfBlob = await generatePdfBlob();
+        const pdfBlob = await generatePdfBlob(quotation);
         if (!cancelled) {
           setSharePdfBlob(pdfBlob);
         }
@@ -66,7 +66,7 @@ export default function ViewQuotationPage() {
       }
     };
 
-    prepareSharePdf();
+    void preparePdf();
 
     return () => {
       cancelled = true;
@@ -87,21 +87,14 @@ export default function ViewQuotationPage() {
   }
 
   const handleExportPDF = async () => {
-    if (loading) return;
+    if (loading || !settings || !documentRef.current) return;
 
     setLoading(true);
     const toastId = toast.loading('Exporting PDF...');
 
     try {
-      const pdfBlob = await generatePdfBlob();
-      const url = URL.createObjectURL(pdfBlob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${quotation.quoteNumber}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      const doc = await generateQuotationPDF(documentRef.current, quotation);
+      doc.save(quotationPdfFilename(quotation));
 
       toast.dismiss(toastId);
       toast.success('PDF export successful');
@@ -115,26 +108,12 @@ export default function ViewQuotationPage() {
     }
   };
 
-  const generatePdfBlob = async () => {
-    const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
-      import('html2canvas'),
-      import('jspdf'),
-    ]);
-
-    const element = printRef.current;
-    if (!element) {
-      throw new Error('Quotation template not found');
+  const generatePdfBlob = async (q: Quotation) => {
+    if (!documentRef.current) {
+      throw new Error('Quotation document is not ready');
     }
-
-    const canvas = await html2canvas(element, { scale: 2 });
-    const data = canvas.toDataURL('image/png');
-    const pdf = new jsPDF('portrait', 'px', 'a4');
-    const imageProperties = pdf.getImageProperties(data);
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = (imageProperties.height * pdfWidth) / imageProperties.width;
-
-    pdf.addImage(data, 'PNG', 0, 0, pdfWidth, pdfHeight);
-    return pdf.output('blob');
+    const doc = await generateQuotationPDF(documentRef.current, q);
+    return doc.output('blob');
   };
 
   const handleShareWhatsApp = async () => {
@@ -172,49 +151,27 @@ export default function ViewQuotationPage() {
     }
   };
 
-  const handlePrintPDF = () => {
-    const element = printRef.current;
-    if (!element) {
-      toast.error('Quotation template not found');
+  const handlePrintPDF = async () => {
+    if (!settings || !documentRef.current) {
+      toast.error('Settings not loaded yet');
       return;
     }
 
-    const printWindow = window.open('', '_blank', 'width=900,height=1200');
-    if (!printWindow) {
-      toast.error('Unable to open print window');
-      return;
+    try {
+      const doc = await generateQuotationPDF(documentRef.current, quotation);
+      const blobUrl = doc.output('bloburl') as unknown as string;
+      const printWindow = window.open(blobUrl, '_blank');
+      if (!printWindow) {
+        toast.error('Unable to open print window');
+        return;
+      }
+      printWindow.onload = () => {
+        printWindow.print();
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to generate PDF for printing';
+      toast.error(message);
     }
-
-    printWindow.document.write(`
-      <!doctype html>
-      <html>
-        <head>
-          <title>${quotation.quoteNumber}</title>
-          <style>
-            body {
-              margin: 0;
-              padding: 24px;
-              background: #ffffff;
-              display: flex;
-              justify-content: center;
-            }
-            @media print {
-              body {
-                padding: 0;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          ${element.outerHTML}
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.onload = () => {
-      printWindow.print();
-    };
   };
 
   const handleStatusChange = (newStatus: Quotation['status']) => {
@@ -283,25 +240,31 @@ export default function ViewQuotationPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Select value={quotation.status} onValueChange={handleStatusChange}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="DRAFT">Draft</SelectItem>
-                <SelectItem value="SENT">Sent</SelectItem>
-                <SelectItem value="CONFIRMED">Confirmed</SelectItem>
-                <SelectItem value="CANCELLED">Cancelled</SelectItem>
-              </SelectContent>
-            </Select>
+            {quotation.status === 'CONFIRMED' ? (
+              getStatusBadge(quotation.status)
+            ) : (
+              <Select value={quotation.status} onValueChange={handleStatusChange}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="DRAFT">Draft</SelectItem>
+                  <SelectItem value="SENT">Sent</SelectItem>
+                  <SelectItem value="CONFIRMED">Confirmed</SelectItem>
+                  <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button variant="outline" onClick={() => navigate(`/quotations/${quotation.id}/edit`)}>
-            <Pencil className="h-4 w-4 mr-2" />
-            Edit Quotation
-          </Button>
+          {quotation.status !== 'CONFIRMED' && (
+            <Button variant="outline" onClick={() => navigate(`/quotations/${quotation.id}/edit`)}>
+              <Pencil className="h-4 w-4 mr-2" />
+              Edit Quotation
+            </Button>
+          )}
           <Button onClick={handleExportPDF} disabled={loading}>
             {loading ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -326,8 +289,8 @@ export default function ViewQuotationPage() {
 
         <div className="flex items-center justify-between rounded-3xl border border-slate-200 bg-white px-5 py-4">
           <div>
-            <p className="text-sm font-medium text-slate-900">Live quotation document</p>
-            <p className="text-sm text-slate-500">The PDF export captures the document below exactly as shown.</p>
+            <p className="text-sm font-medium text-slate-900">Quotation document</p>
+            <p className="text-sm text-slate-500">Review your quotation before printing, sharing, or downloading.</p>
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm text-slate-500">Current status</span>
@@ -336,7 +299,13 @@ export default function ViewQuotationPage() {
         </div>
 
         <div className="rounded-[2rem] bg-gradient-to-br from-slate-100 via-slate-50 to-white p-4 sm:p-6">
-          {settings && <PrintableQuotationDocument ref={printRef} quotation={quotation} settings={settings} />}
+          {settings && (
+            <PrintableQuotationDocument
+              ref={documentRef}
+              quotation={quotation}
+              settings={settings}
+            />
+          )}
         </div>
       </div>
 
