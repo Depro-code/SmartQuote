@@ -39,11 +39,7 @@ export interface Product {
 export interface Customer {
   id: string;
   name: string;
-  company?: string;
-  email?: string;
   phone?: string;
-  address?: string;
-  notes?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -78,6 +74,51 @@ export interface Quotation {
   notes?: string;
   pdfDataUrl?: string;
   createdAt: string;
+  updatedAt: string;
+}
+
+export type SaleType = 'CASH' | 'CREDIT';
+
+export interface SaleItem {
+  description: string;
+  quantity: number | null;
+  unitPrice: number;
+  total: number;
+}
+
+export interface SaleTransaction {
+  id: string;
+  date: string;
+  customer: string;
+  items: SaleItem[];
+  grandTotal: number;
+  type: SaleType;
+  week: number; // 1-4
+  month: string; // "2026-06"
+  quotationId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Expense {
+  id: string;
+  date: string;
+  details: string;
+  amount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PetitCashTopUp {
+  id: string;
+  date: string;
+  amount: number;
+  note?: string;
+}
+
+export interface PetitCash {
+  id: 'global';
+  topUps: PetitCashTopUp[];
   updatedAt: string;
 }
 

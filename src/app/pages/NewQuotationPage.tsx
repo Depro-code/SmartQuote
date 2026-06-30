@@ -43,12 +43,9 @@ export default function NewQuotationPage() {
 
   const [formData, setFormData] = useState({
     customerName: '',
-    customerPhone: '',
-    customerEmail: '',
     issueDate: new Date().toISOString().split('T')[0],
     discount: '',
     taxRate: '',
-    notes: '',
   });
 
   useEffect(() => {
@@ -78,12 +75,9 @@ export default function NewQuotationPage() {
 
     setFormData({
       customerName: quotation.customerName,
-      customerPhone: quotation.customerPhone || '',
-      customerEmail: quotation.customerEmail || '',
       issueDate: quotation.issueDate,
       discount: quotation.discount ? String(quotation.discount) : '',
       taxRate: quotation.taxRate ? String(quotation.taxRate) : '',
-      notes: quotation.notes || '',
     });
     setSelectedCustomerId(quotation.customerId || 'manual');
     setItems(quotation.items);
@@ -111,11 +105,12 @@ export default function NewQuotationPage() {
     ? customers.filter(
         (customer) =>
           customer.name.toLowerCase().includes(customerSearchQuery.toLowerCase()) ||
-          customer.company?.toLowerCase().includes(customerSearchQuery.toLowerCase()) ||
-          customer.email?.toLowerCase().includes(customerSearchQuery.toLowerCase()) ||
           customer.phone?.toLowerCase().includes(customerSearchQuery.toLowerCase()),
       )
     : customers;
+
+  const getProductStock = (productId: string) =>
+    products.find((product) => product.id === productId)?.quantityInStock ?? 0;
 
   const buildQuotationItem = (product: Product): QuotationItem => ({
     productId: product.id,
@@ -144,8 +139,6 @@ export default function NewQuotationPage() {
     setFormData((current) => ({
       ...current,
       customerName: customer.name,
-      customerPhone: customer.phone || '',
-      customerEmail: customer.email || '',
     }));
   };
 
@@ -234,19 +227,14 @@ export default function NewQuotationPage() {
   };
 
   const updateCustomerField = (
-    field: 'customerName' | 'customerPhone' | 'customerEmail',
+    field: 'customerName',
     value: string,
   ) => {
     setFormData((current) => ({ ...current, [field]: value }));
 
     if (selectedCustomerId !== 'manual') {
       const customer = customers.find((entry) => entry.id === selectedCustomerId);
-      const selectedValue =
-        field === 'customerName'
-          ? customer?.name || ''
-          : field === 'customerPhone'
-            ? customer?.phone || ''
-            : customer?.email || '';
+      const selectedValue = 'customerName';
 
       if (value !== selectedValue) {
         setSelectedCustomerId('manual');
@@ -290,8 +278,6 @@ export default function NewQuotationPage() {
         const updatedQuotation = quotationsService.update(id, {
           customerId: selectedCustomerId !== 'manual' ? selectedCustomerId : undefined,
           customerName: formData.customerName,
-          customerPhone: formData.customerPhone || undefined,
-          customerEmail: formData.customerEmail || undefined,
           issueDate: formData.issueDate,
           validUntil: undefined,
           items,
@@ -300,7 +286,6 @@ export default function NewQuotationPage() {
           taxRate: totals.taxRate || undefined,
           taxAmount: totals.taxAmount || undefined,
           grandTotal: totals.grandTotal,
-          notes: formData.notes || undefined,
           status: existingQuotation.status,
         });
 
@@ -314,8 +299,6 @@ export default function NewQuotationPage() {
         const quotation = quotationsService.create({
           customerId: selectedCustomerId !== 'manual' ? selectedCustomerId : undefined,
           customerName: formData.customerName,
-          customerPhone: formData.customerPhone || undefined,
-          customerEmail: formData.customerEmail || undefined,
           status: 'DRAFT',
           issueDate: formData.issueDate,
           validUntil: undefined,
@@ -325,7 +308,6 @@ export default function NewQuotationPage() {
           taxRate: totals.taxRate || undefined,
           taxAmount: totals.taxAmount || undefined,
           grandTotal: totals.grandTotal,
-          notes: formData.notes || undefined,
         });
 
         toast.success('Quotation created successfully');
@@ -377,7 +359,7 @@ export default function NewQuotationPage() {
                   >
                     <span className={selectedCustomer ? 'text-slate-900' : 'text-slate-500'}>
                       {selectedCustomer
-                        ? `${selectedCustomer.name}${selectedCustomer.company ? ` - ${selectedCustomer.company}` : ''}`
+                        ? `${selectedCustomer.name}`
                         : 'Pick a saved customer'}
                     </span>
                     <Search className="h-4 w-4 text-slate-400" />
@@ -397,27 +379,6 @@ export default function NewQuotationPage() {
                     value={formData.customerName}
                     onChange={(e) => updateCustomerField('customerName', e.target.value)}
                     required
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="customerPhone">Phone Number</Label>
-                  <Input
-                    id="customerPhone"
-                    type="tel"
-                    value={formData.customerPhone}
-                    onChange={(e) => updateCustomerField('customerPhone', e.target.value)}
-                    placeholder="+237 6XX XXX XXX"
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="customerEmail">Email</Label>
-                  <Input
-                    id="customerEmail"
-                    type="email"
-                    value={formData.customerEmail}
-                    onChange={(e) => updateCustomerField('customerEmail', e.target.value)}
                   />
                 </div>
 
@@ -461,39 +422,48 @@ export default function NewQuotationPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {items.map((item) => (
-                        <TableRow key={item.productId}>
-                          <TableCell>
-                            <div>
-                              <div className="font-medium">{item.nameSnapshot}</div>
-                              {item.unitSnapshot && (
-                                <div className="text-sm text-gray-500">Unit: {item.unitSnapshot}</div>
+                      {items.map((item) => {
+                        const stock = getProductStock(item.productId);
+
+                        return (
+                          <TableRow key={item.productId}>
+                            <TableCell>
+                              <div>
+                                <div className="font-medium">{item.nameSnapshot}</div>
+                                {item.unitSnapshot && (
+                                  <div className="text-sm text-gray-500">Unit: {item.unitSnapshot}</div>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>{formatCurrency(item.unitPriceSnapshot)}</TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                min="1"
+                                value={item.quantity}
+                                onChange={(e) => updateQuantity(item.productId, Number(e.target.value))}
+                                className="w-24"
+                              />
+                              {item.quantity > stock && (
+                                <p className="mt-1 text-xs font-medium text-orange-600">
+                                  Only {stock} in stock
+                                </p>
                               )}
-                            </div>
-                          </TableCell>
-                          <TableCell>{formatCurrency(item.unitPriceSnapshot)}</TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              min="1"
-                              value={item.quantity}
-                              onChange={(e) => updateQuantity(item.productId, Number(e.target.value))}
-                              className="w-24"
-                            />
-                          </TableCell>
-                          <TableCell className="font-medium">{formatCurrency(item.lineTotal)}</TableCell>
-                          <TableCell>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => removeItem(item.productId)}
-                            >
-                              <Trash2 className="h-4 w-4 text-red-600" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                            </TableCell>
+                            <TableCell className="font-medium">{formatCurrency(item.lineTotal)}</TableCell>
+                            <TableCell>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => removeItem(item.productId)}
+                              >
+                                <Trash2 className="h-4 w-4 text-red-600" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
@@ -558,17 +528,6 @@ export default function NewQuotationPage() {
                   <span>Grand Total:</span>
                   <span>{formatCurrency(totals.grandTotal)}</span>
                 </div>
-              </div>
-
-              <div>
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  id="notes"
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  rows={3}
-                  placeholder="Additional notes or terms..."
-                />
               </div>
             </CardContent>
           </Card>
@@ -751,12 +710,9 @@ function CustomerSelectionCard({
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <div className="font-medium text-slate-900">{customer.name}</div>
-          {customer.company && <div className="text-sm text-slate-600">{customer.company}</div>}
           <div className="text-sm text-gray-500">
             {customer.phone || 'No phone'}
-            {customer.email ? ` | ${customer.email}` : ''}
           </div>
-          {customer.address && <div className="text-sm text-gray-500">{customer.address}</div>}
         </div>
         <div
           className={`flex h-6 w-6 items-center justify-center rounded border text-xs font-semibold ${

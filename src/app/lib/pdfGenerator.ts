@@ -9,12 +9,12 @@ export async function generateQuotationPDF(
   void quotation;
 
   const canvas = await html2canvas(element, {
-    scale: 1.5,
+    scale: 3,
     useCORS: true,
     backgroundColor: '#ffffff',
   });
 
-  const imgData = canvas.toDataURL('image/jpeg', 0.85);
+  const imgData = canvas.toDataURL('image/jpeg', 0.9);
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageWidth = 210;
   const pageHeight = 297;
@@ -86,7 +86,7 @@ export async function generateQuotationPDF(
       sliceHeight,
     );
 
-    const pageImgData = pageCanvas.toDataURL('image/jpeg', 0.85);
+    const pageImgData = pageCanvas.toDataURL('image/jpeg', 0.9);
     const pageImgHeight = (sliceHeight / canvas.width) * pageWidth;
     doc.addImage(pageImgData, 'JPEG', 0, pageMarginTop, pageWidth, pageImgHeight);
 

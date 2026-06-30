@@ -1,4 +1,14 @@
-import type { Customer, Product, Quotation, Settings, User } from './types';
+import type {
+  Customer,
+  Expense,
+  PetitCash,
+  Product,
+  Quotation,
+  SaleTransaction,
+  SaleType,
+  Settings,
+  User,
+} from './types';
 
 // localStorage keys
 const KEYS = {
@@ -8,6 +18,9 @@ const KEYS = {
   PRODUCTS: 'smartquote_products',
   CUSTOMERS: 'smartquote_customers',
   QUOTATIONS: 'smartquote_quotations',
+  SALES: 'smartquote_sales',
+  EXPENSES: 'smartquote_expenses',
+  PETIT_CASH: 'smartquote_petit_cash',
 };
 
 const DEFAULT_SETTINGS: Settings = {
@@ -119,11 +132,7 @@ function createSeedCustomer(
   return {
     id,
     name,
-    company,
-    email,
     phone,
-    address,
-    notes,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -218,6 +227,24 @@ function initializeDefaults() {
   // Initialize empty quotations
   if (!localStorage.getItem(KEYS.QUOTATIONS)) {
     localStorage.setItem(KEYS.QUOTATIONS, JSON.stringify([]));
+  }
+
+  // Initialize empty sales
+  if (!localStorage.getItem(KEYS.SALES)) {
+    localStorage.setItem(KEYS.SALES, JSON.stringify([]));
+  }
+
+  // Initialize empty expenses
+  if (!localStorage.getItem(KEYS.EXPENSES)) {
+    localStorage.setItem(KEYS.EXPENSES, JSON.stringify([]));
+  }
+
+  // Initialize global petit cash record
+  if (!localStorage.getItem(KEYS.PETIT_CASH)) {
+    localStorage.setItem(
+      KEYS.PETIT_CASH,
+      JSON.stringify({ id: 'global', topUps: [], updatedAt: new Date().toISOString() }),
+    );
   }
 
   // Initialize customers
@@ -426,8 +453,6 @@ export const customersService = {
     return customers.filter(
       (customer) =>
         customer.name.toLowerCase().includes(lowerQuery) ||
-        customer.company?.toLowerCase().includes(lowerQuery) ||
-        customer.email?.toLowerCase().includes(lowerQuery) ||
         customer.phone?.toLowerCase().includes(lowerQuery),
     );
   },
@@ -529,9 +554,218 @@ export const quotationsService = {
       }
     });
 
+    const confirmationDate = new Date();
+    const date = confirmationDate.toISOString();
+    const confirmationDay = confirmationDate.getDate();
+    const week =
+      confirmationDay <= 7 ? 1 : confirmationDay <= 15 ? 2 : confirmationDay <= 22 ? 3 : 4;
+    const month = `${confirmationDate.getFullYear()}-${String(confirmationDate.getMonth() + 1).padStart(2, '0')}`;
+
+    salesService.create({
+      date,
+      customer: quotation.customerName,
+      items: quotation.items.map((item) => ({
+        description: item.nameSnapshot,
+        quantity: item.quantity,
+        unitPrice: item.unitPriceSnapshot,
+        total: item.lineTotal,
+      })),
+      grandTotal: quotation.grandTotal,
+      type: 'CASH',
+      week,
+      month,
+      quotationId: quotation.id,
+    });
+
     // Update quotation status
     quotationsService.update(id, { status: 'CONFIRMED' });
     return true;
+  },
+};
+
+// Sales Service
+export const salesService = {
+  getAll: (): SaleTransaction[] => {
+    initializeDefaults();
+    return JSON.parse(localStorage.getItem(KEYS.SALES) || '[]');
+  },
+
+  getById: (id: string): SaleTransaction | null => {
+    const sales = salesService.getAll();
+    return sales.find((sale) => sale.id === id) || null;
+  },
+
+  getByMonth: (month: string): SaleTransaction[] => {
+    const sales = salesService.getAll();
+    return sales.filter((sale) => sale.month === month);
+  },
+
+  getByMonthAndWeek: (month: string, week: number): SaleTransaction[] => {
+    const sales = salesService.getByMonth(month);
+    return sales.filter((sale) => sale.week === week);
+  },
+
+  getByType: (month: string, type: SaleType): SaleTransaction[] => {
+    const sales = salesService.getByMonth(month);
+    return sales.filter((sale) => sale.type === type);
+  },
+
+  create: (data: Omit<SaleTransaction, 'id' | 'createdAt' | 'updatedAt'>): SaleTransaction => {
+    const sales = salesService.getAll();
+    const now = new Date().toISOString();
+    const newSale: SaleTransaction = {
+      ...data,
+      id: Date.now().toString(),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    sales.push(newSale);
+    localStorage.setItem(KEYS.SALES, JSON.stringify(sales));
+    return newSale;
+  },
+
+  update: (id: string, updates: Partial<SaleTransaction>): SaleTransaction | null => {
+    const sales = salesService.getAll();
+    const index = sales.findIndex((sale) => sale.id === id);
+
+    if (index === -1) return null;
+
+    sales[index] = {
+      ...sales[index],
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+
+    localStorage.setItem(KEYS.SALES, JSON.stringify(sales));
+    return sales[index];
+  },
+
+  delete: (id: string): boolean => {
+    const sales = salesService.getAll();
+    const filtered = sales.filter((sale) => sale.id !== id);
+
+    if (filtered.length === sales.length) return false;
+
+    localStorage.setItem(KEYS.SALES, JSON.stringify(filtered));
+    return true;
+  },
+
+  getMonthSummary: (month: string): { cashTotal: number; creditTotal: number; grandTotal: number } => {
+    const sales = salesService.getByMonth(month);
+    const cashTotal = sales
+      .filter((sale) => sale.type === 'CASH')
+      .reduce((total, sale) => total + sale.grandTotal, 0);
+    const creditTotal = sales
+      .filter((sale) => sale.type === 'CREDIT')
+      .reduce((total, sale) => total + sale.grandTotal, 0);
+
+    return {
+      cashTotal,
+      creditTotal,
+      grandTotal: cashTotal + creditTotal,
+    };
+  },
+};
+
+// Expenses Service
+export const expensesService = {
+  getAll: (): Expense[] => {
+    initializeDefaults();
+    return JSON.parse(localStorage.getItem(KEYS.EXPENSES) || '[]');
+  },
+
+  getByDateRange: (from: string, to: string): Expense[] => {
+    const expenses = expensesService.getAll();
+    return expenses.filter((expense) => expense.date >= from && expense.date <= to);
+  },
+
+  create: (data: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'>): Expense => {
+    const expenses = expensesService.getAll();
+    const now = new Date().toISOString();
+    const newExpense: Expense = {
+      ...data,
+      id: Date.now().toString(),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    expenses.push(newExpense);
+    localStorage.setItem(KEYS.EXPENSES, JSON.stringify(expenses));
+    return newExpense;
+  },
+
+  update: (id: string, updates: Partial<Expense>): Expense | null => {
+    const expenses = expensesService.getAll();
+    const index = expenses.findIndex((expense) => expense.id === id);
+
+    if (index === -1) return null;
+
+    expenses[index] = {
+      ...expenses[index],
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+
+    localStorage.setItem(KEYS.EXPENSES, JSON.stringify(expenses));
+    return expenses[index];
+  },
+
+  delete: (id: string): boolean => {
+    const expenses = expensesService.getAll();
+    const filtered = expenses.filter((expense) => expense.id !== id);
+
+    if (filtered.length === expenses.length) return false;
+
+    localStorage.setItem(KEYS.EXPENSES, JSON.stringify(filtered));
+    return true;
+  },
+
+  getMonthTotal: (month: string): number => {
+    const expenses = expensesService.getAll().filter((expense) => expense.date.startsWith(month));
+    return expenses.reduce((total, expense) => total + expense.amount, 0);
+  },
+};
+
+// Petit Cash Service
+export const petitCashService = {
+  get: (): PetitCash => {
+    const stored = localStorage.getItem(KEYS.PETIT_CASH);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed?.id === 'global' && Array.isArray(parsed.topUps)) return parsed;
+    }
+
+    const initial: PetitCash = { id: 'global', topUps: [], updatedAt: new Date().toISOString() };
+    localStorage.setItem(KEYS.PETIT_CASH, JSON.stringify(initial));
+    return initial;
+  },
+
+  addTopUp: (date: string, amount: number, note?: string): PetitCash => {
+    const record = petitCashService.get();
+    record.topUps.push({ id: Date.now().toString(), date, amount, note });
+    record.updatedAt = new Date().toISOString();
+    localStorage.setItem(KEYS.PETIT_CASH, JSON.stringify(record));
+    return record;
+  },
+
+  removeTopUp: (id: string): PetitCash => {
+    const record = petitCashService.get();
+    record.topUps = record.topUps.filter((topUp) => topUp.id !== id);
+    record.updatedAt = new Date().toISOString();
+    localStorage.setItem(KEYS.PETIT_CASH, JSON.stringify(record));
+    return record;
+  },
+
+  getRunningBalance: (): number => {
+    const record = petitCashService.get();
+    const totalTopUps = record.topUps.reduce((sum, topUp) => sum + topUp.amount, 0);
+    const totalExpenses = expensesService.getAll().reduce((sum, expense) => sum + expense.amount, 0);
+    return totalTopUps - totalExpenses;
+  },
+
+  getTotalTopUps: (): number => {
+    return petitCashService.get().topUps.reduce((sum, topUp) => sum + topUp.amount, 0);
   },
 };
 

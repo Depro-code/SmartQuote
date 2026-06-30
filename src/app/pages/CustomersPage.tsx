@@ -38,20 +38,12 @@ import type { Customer } from '../lib/types';
 
 interface CustomerFormState {
   name: string;
-  company: string;
-  email: string;
   phone: string;
-  address: string;
-  notes: string;
 }
 
 const EMPTY_FORM: CustomerFormState = {
   name: '',
-  company: '',
-  email: '',
   phone: '',
-  address: '',
-  notes: '',
 };
 
 const CUSTOMERS_PAGE_SIZE = 10;
@@ -127,11 +119,7 @@ export default function CustomersPage() {
     setEditingCustomer(customer);
     setFormData({
       name: customer.name,
-      company: customer.company || '',
-      email: customer.email || '',
       phone: customer.phone || '',
-      address: customer.address || '',
-      notes: customer.notes || '',
     });
     setIsDialogOpen(true);
   };
@@ -141,11 +129,7 @@ export default function CustomersPage() {
 
     const payload = {
       name: formData.name.trim(),
-      company: formData.company.trim() || undefined,
-      email: formData.email.trim() || undefined,
       phone: formData.phone.trim() || undefined,
-      address: formData.address.trim() || undefined,
-      notes: formData.notes.trim() || undefined,
     };
 
     if (editingCustomer) {
@@ -228,9 +212,7 @@ export default function CustomersPage() {
               <TableHeader className="sticky top-0 z-20 bg-card">
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Name</TableHead>
-                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Company</TableHead>
                   <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Contact</TableHead>
-                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Address</TableHead>
                   <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Quotes</TableHead>
                   <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Updated</TableHead>
                   <TableHead className="border-b border-border px-4 py-3 text-right text-xs font-semibold uppercase text-muted-foreground">Actions</TableHead>
@@ -248,19 +230,11 @@ export default function CustomersPage() {
                     <TableRow key={customer.id} className="group hover:bg-muted/40">
                       <TableCell className="px-4 py-3">
                         <div className="font-medium text-foreground">{customer.name}</div>
-                        {customer.notes && (
-                          <div className="mt-1 line-clamp-1 text-sm text-muted-foreground">{customer.notes}</div>
-                        )}
                       </TableCell>
-                      <TableCell className="px-4 py-3 text-muted-foreground">{customer.company || '-'}</TableCell>
                       <TableCell className="px-4 py-3">
                         <div className="space-y-1 text-sm">
                           <div className="text-foreground">{customer.phone || '-'}</div>
-                          <div className="text-muted-foreground">{customer.email || '-'}</div>
                         </div>
-                      </TableCell>
-                      <TableCell className="max-w-xs whitespace-normal px-4 py-3 text-sm text-muted-foreground">
-                        {customer.address || '-'}
                       </TableCell>
                       <TableCell className="px-4 py-3">{quotationCounts[customer.id] || 0}</TableCell>
                       <TableCell className="px-4 py-3 text-muted-foreground">
@@ -339,45 +313,11 @@ export default function CustomersPage() {
                 />
               </div>
               <div>
-                <Label htmlFor="customer-company">Company</Label>
-                <Input
-                  id="customer-company"
-                  value={formData.company}
-                  onChange={(event) => setFormData({ ...formData, company: event.target.value })}
-                />
-              </div>
-              <div>
                 <Label htmlFor="customer-phone">Phone</Label>
                 <Input
                   id="customer-phone"
                   value={formData.phone}
                   onChange={(event) => setFormData({ ...formData, phone: event.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="customer-email">Email</Label>
-                <Input
-                  id="customer-email"
-                  type="email"
-                  value={formData.email}
-                  onChange={(event) => setFormData({ ...formData, email: event.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="customer-address">Address</Label>
-                <Input
-                  id="customer-address"
-                  value={formData.address}
-                  onChange={(event) => setFormData({ ...formData, address: event.target.value })}
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <Label htmlFor="customer-notes">Notes</Label>
-                <Textarea
-                  id="customer-notes"
-                  rows={4}
-                  value={formData.notes}
-                  onChange={(event) => setFormData({ ...formData, notes: event.target.value })}
                 />
               </div>
             </div>

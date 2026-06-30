@@ -9,6 +9,8 @@ import {
   LogOut,
   Menu,
   X,
+  DollarSign,
+  Banknote,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from './ui/button';
@@ -23,6 +25,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     { name: 'Products', href: '/products', icon: Package },
     { name: 'Customers', href: '/customers', icon: Users },
     { name: 'Quotations', href: '/quotations', icon: FileText },
+    { name: 'Sales', href: '/sales', icon: DollarSign },
+    { name: 'Expenses', href: '/expenses', icon: Banknote },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
 
@@ -112,7 +116,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Page content */}
-        <main className="p-4 lg:p-8">{children}</main>
+        <main className="p-1 lg:p-2">{children}</main>
       </div>
     </div>
   );

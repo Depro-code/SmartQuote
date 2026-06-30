@@ -232,7 +232,6 @@ export default function ViewQuotationPage() {
             </Button>
             <div>
               <h1 className="text-3xl font-semibold text-gray-900">{quotation.quoteNumber}</h1>
-              <p className="mt-1 text-gray-600">Quotation preview and export</p>
               <div className="mt-2 text-sm text-slate-500">
                 <div>Created: {format(new Date(quotation.createdAt), 'MMMM dd, yyyy')}</div>
                 <div>Modified: {format(new Date(quotation.updatedAt), 'MMMM dd, yyyy')}</div>
@@ -265,6 +264,11 @@ export default function ViewQuotationPage() {
               Edit Quotation
             </Button>
           )}
+          {quotation.status === 'CONFIRMED' && (
+            <Button variant="outline" onClick={() => navigate(`/receipts/new?from=${quotation.id}`)}>
+              Generate Cash Receipt
+            </Button>
+          )}
           <Button onClick={handleExportPDF} disabled={loading}>
             {loading ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -285,17 +289,6 @@ export default function ViewQuotationPage() {
               Share via WhatsApp
             </Button>
           )}
-        </div>
-
-        <div className="flex items-center justify-between rounded-3xl border border-slate-200 bg-white px-5 py-4">
-          <div>
-            <p className="text-sm font-medium text-slate-900">Quotation document</p>
-            <p className="text-sm text-slate-500">Review your quotation before printing, sharing, or downloading.</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-slate-500">Current status</span>
-            {getStatusBadge(quotation.status)}
-          </div>
         </div>
 
         <div className="rounded-[2rem] bg-gradient-to-br from-slate-100 via-slate-50 to-white p-4 sm:p-6">

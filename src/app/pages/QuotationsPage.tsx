@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DashboardLayout } from '../components/DashboardLayout';
-import { quotationsService } from '../lib/services';
+import { quotationsService, salesService } from '../lib/services';
 import type { Quotation } from '../lib/types';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -20,9 +20,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, Search, Eye, Pencil } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Search, Eye, Pencil, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { format } from 'date-fns';
+import { AlertDialog } from '@radix-ui/react-alert-dialog';
+import { AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../components/ui/alert-dialog';
+import { toast } from 'sonner';
 
 const QUOTATIONS_PAGE_SIZE = 10;
 
@@ -33,6 +36,7 @@ export default function QuotationsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [filteredQuotations, setFilteredQuotations] = useState<Quotation[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [deleteQuotationId, setDeleteQuotationId] = useState<string | null>(null);
 
   useEffect(() => {
     loadQuotations();
@@ -102,6 +106,27 @@ export default function QuotationsPage() {
     );
   };
 
+  const confirmDelete = () => {
+    if (!deleteQuotationId) return;
+
+    // get sale id if quotation has a linked sale
+    const linkedSale = salesService.getAll().find((sale) => sale.quotationId === deleteQuotationId);
+    if (linkedSale) {
+      // unlink the sale
+      salesService.update(linkedSale.id, { quotationId: undefined });
+    }
+
+
+    const success = quotationsService.delete(deleteQuotationId);
+    if (success) {
+      toast.success('Quotation deleted successfully');
+      loadQuotations();
+    } else {
+      toast.error('Error deleting quotation');
+    }
+    setDeleteQuotationId(null);
+  };
+
   return (
     <DashboardLayout>
       <div className="flex h-[calc(100svh-5rem)] min-h-[620px] flex-col overflow-hidden rounded-lg border border-border bg-card">
@@ -167,7 +192,9 @@ export default function QuotationsPage() {
                   </TableRow>
                 ) : (
                   paginatedQuotations.map((quotation) => (
-                    <TableRow key={quotation.id} className="group hover:bg-muted/40">
+                    <TableRow key={quotation.id} className="group hover:bg-muted/40" 
+                      onClick={() => navigate(`/quotations/${quotation.id}`)}
+                      >
                       <TableCell className="px-4 py-3 font-medium text-foreground">{quotation.quoteNumber}</TableCell>
                       <TableCell className="px-4 py-3">
                         <div>
@@ -197,7 +224,7 @@ export default function QuotationsPage() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
-                              onClick={() => navigate(`/quotations/${quotation.id}/edit`)}
+                              onClick={(e) =>{ e.stopPropagation(); navigate(`/quotations/${quotation.id}/edit`)}}
                             >
                               <Pencil className="h-4 w-4" />
                             </Button>
@@ -206,9 +233,12 @@ export default function QuotationsPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
-                            onClick={() => navigate(`/quotations/${quotation.id}`)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteQuotationId(quotation.id);
+                          }}
                           >
-                            <Eye className="h-4 w-4" />
+                            <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         </div>
                       </TableCell>
@@ -249,6 +279,23 @@ export default function QuotationsPage() {
           </div>
         </div>
       </div>
+
+      <AlertDialog open={!!deleteQuotationId} onOpenChange={() => setDeleteQuotationId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Quotation</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete this quotation? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }

@@ -11,6 +11,10 @@ import NewQuotationPage from './pages/NewQuotationPage';
 import ViewQuotationPage from './pages/ViewQuotationPage';
 import SettingsPage from './pages/SettingsPage';
 import CustomersPage from './pages/CustomersPage';
+import SalesPage from './pages/SalesPage';
+import SaleDetailPage from './pages/SaleDetailPage';
+import ExpensesPage from './pages/ExpensesPage';
+import CashReceiptPage from './pages/CashReceiptPage';
 
 export const router = createBrowserRouter([
   {
@@ -94,6 +98,38 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <ViewQuotationPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/sales',
+    element: (
+      <ProtectedRoute>
+        <SalesPage/>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/sales/:id',
+    element: (
+      <ProtectedRoute>
+        <SaleDetailPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/expenses',
+    element: (
+      <ProtectedRoute>
+        <ExpensesPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/receipts/new',
+    element: (
+      <ProtectedRoute>
+        <CashReceiptPage />
       </ProtectedRoute>
     ),
   },

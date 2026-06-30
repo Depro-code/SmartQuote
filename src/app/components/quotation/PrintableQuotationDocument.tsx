@@ -18,7 +18,7 @@ const pageStyle: CSSProperties = {
   margin: '0 auto',
   overflow: 'hidden',
   backgroundColor: '#ffffff',
-  color: '#111111',
+  color: '#111111',j
   boxShadow: '0 24px 60px rgba(15, 23, 42, 0.14)',
   fontFamily: bodyFontFamily,
 };
@@ -44,17 +44,10 @@ const bottomAccentBaseStyle: CSSProperties = {
 const tableCellBase: CSSProperties = {
   border: '1px solid #6f6f6f',
   boxSizing: 'border-box',
-  padding: '8px 6px',
+  padding: '8px 6px 16px',
   fontSize: '12px',
   lineHeight: '18px',
   verticalAlign: 'middle',
-};
-
-const metadataLabelStyle: CSSProperties = {
-  fontSize: '11px',
-  fontWeight: 700,
-  letterSpacing: '0.02em',
-  textTransform: 'uppercase',
 };
 
 export const PrintableQuotationDocument = forwardRef<HTMLDivElement, PrintableQuotationDocumentProps>(
@@ -62,34 +55,34 @@ export const PrintableQuotationDocument = forwardRef<HTMLDivElement, PrintableQu
     const totalInWords = amountToWords(quotation.grandTotal, settings.currency)
       .replace(/\bXAF\b/i, 'francs')
       .replace(/\bCFA\b/i, 'francs');
-    const hasFewItems = quotation.items.length <= 4;
+    const hasFewItems = quotation.items.length <= 8;
     const bodyCellStyle: CSSProperties = {
       ...tableCellBase,
-      padding: hasFewItems ? '10px 8px' : '9px 7px',
-      fontSize: hasFewItems ? '14px' : '13px',
+      padding: '8px 6px 16px',
+      fontSize: hasFewItems ? '17px' : '15px',
       lineHeight: hasFewItems ? '21px' : '20px',
     };
     const headerCellStyle: CSSProperties = {
       ...tableCellBase,
-      padding: '12px 6px',
-      fontSize: '15px',
+      padding: '8px 6px 16px',
+      fontSize: '18px',
       lineHeight: '22px',
       fontWeight: 900,
       fontFamily: headingFontFamily,
       textAlign: 'center',
-      verticalAlign: 'middle',
+      verticalAlign: 'top',
     };
     const totalCellStyle: CSSProperties = {
       ...tableCellBase,
-      padding: '12px 12px',
+      padding: '12px 12px 16px',
       fontSize: '19px',
       lineHeight: '24px',
       fontWeight: 900,
       fontFamily: headingFontFamily,
-      verticalAlign: 'middle',
+      verticalAlign: 'top',
     };
-    const wordsLabelFontSize = hasFewItems ? '16px' : '14px';
-    const wordsValueFontSize = hasFewItems ? '14px' : '12px';
+
+    const footerMarginTop = hasFewItems ? '98px' : '18px';
 
     return (
       <div ref={ref} style={pageStyle}>
@@ -138,13 +131,6 @@ export const PrintableQuotationDocument = forwardRef<HTMLDivElement, PrintableQu
         >
           <header style={{ textAlign: 'center', paddingTop: '2px' }}>
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px' }}>
-              {settings.logoUrl ? (
-                <img
-                  src={settings.logoUrl}
-                  alt={`${settings.companyName} logo`}
-                  style={{ width: '52px', height: '52px', objectFit: 'contain' }}
-                />
-              ) : null}
               <h1
                 style={{
                   margin: 0,
@@ -194,7 +180,7 @@ export const PrintableQuotationDocument = forwardRef<HTMLDivElement, PrintableQu
             </div>
 
             <div style={{ marginTop: '8px' }}>
-              <p style={{ margin: 0, fontSize: '14px', fontWeight: 900, fontFamily: headingFontFamily, textAlign: 'center' }}>
+              <p style={{ margin: 0, fontSize: '18px', fontWeight: 900, fontFamily: headingFontFamily, textAlign: 'center' }}>
                 {settings.invoiceTitle}: {quotation.quoteNumber}
               </p>
               <p style={{ margin: '10px 0 0', fontSize: '18px', textAlign: 'left', fontFamily: bodyFontFamily }}>
@@ -235,23 +221,23 @@ export const PrintableQuotationDocument = forwardRef<HTMLDivElement, PrintableQu
               <tbody>
                 {quotation.items.map((item, index) => (
                   <tr key={`${item.productId}-${index}`}>
-                    <td style={{ ...bodyCellStyle, textAlign: 'center', fontWeight: 700, fontFamily: bodyFontFamily }}>{index + 1}</td>
+                    <td style={{ ...bodyCellStyle, textAlign: 'center', fontWeight: 600, fontFamily: bodyFontFamily }}>{index + 1}</td>
                     <td
                       style={{
                         ...bodyCellStyle,
-                        fontWeight: 700,
+                        fontWeight: 600,
                         fontFamily: bodyFontFamily,
                       }}
                     >
                       {item.nameSnapshot}
                     </td>
-                    <td style={{ ...bodyCellStyle, textAlign: 'center', fontWeight: 700, fontFamily: bodyFontFamily }}>
+                    <td style={{ ...bodyCellStyle, textAlign: 'center', fontWeight: 600, fontFamily: bodyFontFamily }}>
                       {String(item.quantity).padStart(2, '0')}
                     </td>
-                    <td style={{ ...bodyCellStyle, textAlign: 'right', fontWeight: 700, fontFamily: bodyFontFamily }}>
+                    <td style={{ ...bodyCellStyle, textAlign: 'right', fontWeight: 600, fontFamily: bodyFontFamily }}>
                       {formatInvoiceCurrency(item.unitPriceSnapshot, settings.currency)}
                     </td>
-                    <td style={{ ...bodyCellStyle, textAlign: 'right', fontWeight: 700, fontFamily: bodyFontFamily }}>
+                    <td style={{ ...bodyCellStyle, textAlign: 'right', fontWeight: 600, fontFamily: bodyFontFamily }}>
                       {formatInvoiceCurrency(item.lineTotal, settings.currency)}
                     </td>
                   </tr>
@@ -293,15 +279,15 @@ export const PrintableQuotationDocument = forwardRef<HTMLDivElement, PrintableQu
               </tbody>
             </table>
 
-            <div style={{ marginTop: '12px', fontSize: wordsLabelFontSize, lineHeight: 1.6, fontWeight: 900, fontFamily: headingFontFamily }}>
+            <div style={{ marginTop: '12px', fontSize: '16px', lineHeight: 1.6, fontWeight: 900, fontFamily: headingFontFamily }}>
               Amount in words:{' '}
-              <span style={{ fontSize: wordsValueFontSize, fontWeight: 700, fontFamily: bodyFontFamily }}>
+              <span style={{ fontSize: '16px', fontWeight: 700, fontFamily: bodyFontFamily }}>
                 {totalInWords.charAt(0).toUpperCase()}
                 {totalInWords.slice(1)}
               </span>
             </div>
 
-            <footer style={{ marginTop: '18px', position: 'relative', paddingBottom: '20px' }}>
+            <footer style={{ marginTop: footerMarginTop, position: 'relative', paddingBottom: '20px' }}>
               <div
                 style={{
                   display: 'grid',
@@ -312,53 +298,6 @@ export const PrintableQuotationDocument = forwardRef<HTMLDivElement, PrintableQu
               >
                 <div style={{ textAlign: 'center' }}>
                   <p style={{ margin: 0, fontSize: '16px', fontWeight: 900, fontFamily: headingFontFamily }}>Service provider</p>
-                  <div
-                    style={{
-                      width: '82px',
-                      height: '82px',
-                      margin: '14px auto 0',
-                      borderRadius: '50%',
-                      border: '2px solid #3b82f6',
-                      position: 'relative',
-                      color: '#3b82f6',
-                    }}
-                  >
-                    <div
-                      style={{
-                        position: 'absolute',
-                        inset: '10px',
-                        borderRadius: '50%',
-                        border: '1px solid #3b82f6',
-                      }}
-                    />
-                    <p
-                      style={{
-                        margin: 0,
-                        position: 'absolute',
-                        top: '31px',
-                        left: '50%',
-                        transform: 'translateX(-50%)',
-                        width: '100%',
-                        fontSize: '8px',
-                        fontWeight: 700,
-                        fontFamily: bodyFontFamily,
-                        letterSpacing: '0.08em',
-                      }}
-                    >
-                      {settings.companyName}
-                    </p>
-                  </div>
-                  <p
-                    style={{
-                      margin: '-28px 0 0',
-                      fontSize: '28px',
-                      fontFamily: '"Brush Script MT", "Segoe Script", cursive',
-                      color: '#2563eb',
-                      transform: 'rotate(-7deg)',
-                    }}
-                  >
-                    Signature
-                  </p>
                 </div>
 
                 <div style={{ textAlign: 'center', paddingTop: '8px' }}>

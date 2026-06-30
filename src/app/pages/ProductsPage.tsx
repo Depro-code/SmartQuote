@@ -49,7 +49,7 @@ import { useNavigate } from 'react-router';
 import { useIsMobile } from '../components/ui/use-mobile';
 import { ProductShareCard } from '../components/product/ProductShareCard';
 
-const PRODUCTS_PAGE_SIZE = 10;
+const PRODUCTS_PAGE_SIZE = 30;
 
 export default function ProductsPage() {
   const navigate = useNavigate();
@@ -234,9 +234,6 @@ export default function ProductsPage() {
               Total: {products.length}
             </span>
             <span className="rounded-md border border-border bg-background px-2.5 py-1">
-              Showing: {totalCount}
-            </span>
-            <span className="rounded-md border border-border bg-background px-2.5 py-1">
               Page {currentPage} of {totalPages}
             </span>
           </div>
@@ -280,7 +277,7 @@ export default function ProductsPage() {
                             className="h-12 w-12 rounded-md border border-border object-cover"
                           />
                       </TableCell>
-                      <TableCell className="max-w-[420px] px-4 py-3">
+                      <TableCell className="max-w-[380px] px-4 py-3">
                         <button
                           type="button"
                           onClick={() => navigate(`/products/${product.id}`)}
