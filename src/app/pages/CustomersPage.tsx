@@ -190,7 +190,7 @@ export default function CustomersPage() {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search by name, company, phone, or email..."
+              placeholder="Search by name, or phone..."
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               className="h-9 pl-10"

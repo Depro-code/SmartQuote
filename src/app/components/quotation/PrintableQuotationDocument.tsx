@@ -18,7 +18,7 @@ const pageStyle: CSSProperties = {
   margin: '0 auto',
   overflow: 'hidden',
   backgroundColor: '#ffffff',
-  color: '#111111',j
+  color: '#111111',
   boxShadow: '0 24px 60px rgba(15, 23, 42, 0.14)',
   fontFamily: bodyFontFamily,
 };
