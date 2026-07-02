@@ -79,12 +79,18 @@ export default function ProductDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    const foundProduct = productsService.getById(id);
-    setProduct(foundProduct);
-    if (foundProduct) {
-      setFormData(toFormState(foundProduct));
-      setStockQuantity(foundProduct.quantityInStock);
-    }
+    let isMounted = true;
+    productsService.getById(id).then((foundProduct) => {
+      if (!isMounted) return;
+      setProduct(foundProduct);
+      if (foundProduct) {
+        setFormData(toFormState(foundProduct));
+        setStockQuantity(foundProduct.quantityInStock);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
   }, [id]);
 
   const formatCurrency = (amount: number) => {
@@ -125,9 +131,9 @@ export default function ProductDetailPage() {
     isActive: data.isActive,
   });
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!id || !formData) return;
-    const updated = productsService.update(id, buildPayload(formData));
+    const updated = await productsService.update(id, buildPayload(formData));
     if (!updated) {
       toast.error('Failed to update product');
       return;
@@ -151,7 +157,7 @@ export default function ProductDetailPage() {
 
     try {
       const imageUrl = await imageService.compressImage(file);
-      const updated = productsService.update(id, { imageUrl });
+      const updated = await productsService.update(id, { imageUrl });
       if (!updated) {
         throw new Error('Failed to save image');
       }
@@ -164,9 +170,9 @@ export default function ProductDetailPage() {
     }
   };
 
-  const handleStockUpdate = () => {
+  const handleStockUpdate = async () => {
     if (!id) return;
-    const updated = productsService.update(id, { quantityInStock: Number(stockQuantity) || 0 });
+    const updated = await productsService.update(id, { quantityInStock: Number(stockQuantity) || 0 });
     if (!updated) {
       toast.error('Failed to update stock');
       return;
@@ -175,9 +181,9 @@ export default function ProductDetailPage() {
     toast.success('Stock updated');
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!id) return;
-    const success = productsService.delete(id);
+    const success = await productsService.delete(id);
     if (!success) {
       toast.error('Failed to delete product');
       return;

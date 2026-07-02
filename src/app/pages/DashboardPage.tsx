@@ -15,19 +15,28 @@ export default function DashboardPage() {
   });
 
   useEffect(() => {
-    const products = productsService.getAll();
-    const customers = customersService.getAll();
-    const lowStock = productsService.getLowStock();
-    const allQuotations = quotationsService.getAll();
-    const monthQuotations = quotationsService.getThisMonth();
+    let isMounted = true;
 
-    setStats({
-      totalProducts: products.length,
-      totalCustomers: customers.length,
-      lowStockCount: lowStock.length,
-      quotationsThisMonth: monthQuotations.length,
-      totalQuotations: allQuotations.length,
+    Promise.all([
+      productsService.getAll(),
+      customersService.getAll(),
+      productsService.getLowStock(),
+      quotationsService.getAll(),
+      quotationsService.getThisMonth(),
+    ]).then(([products, customers, lowStock, allQuotations, monthQuotations]) => {
+      if (!isMounted) return;
+      setStats({
+        totalProducts: products.length,
+        totalCustomers: customers.length,
+        lowStockCount: lowStock.length,
+        quotationsThisMonth: monthQuotations.length,
+        totalQuotations: allQuotations.length,
+      });
     });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const cards = [

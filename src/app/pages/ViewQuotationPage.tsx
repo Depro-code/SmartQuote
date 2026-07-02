@@ -42,9 +42,15 @@ export default function ViewQuotationPage() {
 
   useEffect(() => {
     if (id) {
-      const q = quotationsService.getById(id);
-      setQuotation(q);
-      setSettings(settingsService.get());
+      let isMounted = true;
+      Promise.all([quotationsService.getById(id), settingsService.get()]).then(([q, s]) => {
+        if (!isMounted) return;
+        setQuotation(q);
+        setSettings(s);
+      });
+      return () => {
+        isMounted = false;
+      };
     }
   }, [id]);
 
@@ -117,7 +123,7 @@ export default function ViewQuotationPage() {
   };
 
   const handleShareWhatsApp = async () => {
-    const currentSettings = settings || settingsService.get();
+    const currentSettings = settings || (await settingsService.get());
 
     if (!navigator.share) {
       toast.error('File sharing is not supported on this device');
@@ -174,24 +180,24 @@ export default function ViewQuotationPage() {
     }
   };
 
-  const handleStatusChange = (newStatus: Quotation['status']) => {
+  const handleStatusChange = async (newStatus: Quotation['status']) => {
     if (newStatus === 'CONFIRMED' && quotation.status !== 'CONFIRMED') {
       setShowConfirmDialog(true);
       return;
     }
 
-    quotationsService.update(quotation.id, { status: newStatus });
-    const updated = quotationsService.getById(quotation.id);
+    await quotationsService.update(quotation.id, { status: newStatus });
+    const updated = await quotationsService.getById(quotation.id);
     if (updated) {
       setQuotation(updated);
       toast.success(`Status updated to ${newStatus}`);
     }
   };
 
-  const confirmQuotation = () => {
-    const success = quotationsService.confirmQuotation(quotation.id);
+  const confirmQuotation = async () => {
+    const success = await quotationsService.confirmQuotation(quotation.id);
     if (success) {
-      const updated = quotationsService.getById(quotation.id);
+      const updated = await quotationsService.getById(quotation.id);
       if (updated) {
         setQuotation(updated);
         toast.success('Quotation confirmed and stock updated');

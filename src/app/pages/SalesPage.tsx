@@ -156,8 +156,8 @@ export default function SalesPage() {
   const paginatedSales = sales.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const weekRangeLabel = getWeekRangeLabel(selectedMonth, selectedWeek);
 
-  const loadSales = () => {
-    setAllSales(salesService.getByType(selectedMonth, activeTab));
+  const loadSales = async () => {
+    setAllSales(await salesService.getByType(selectedMonth, activeTab));
   };
 
   useEffect(() => {
@@ -188,10 +188,10 @@ export default function SalesPage() {
     setCurrentPage(1);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteSaleId) return;
 
-    const success = salesService.delete(deleteSaleId);
+    const success = await salesService.delete(deleteSaleId);
     if (success) {
       toast.success('Sale transaction deleted');
       loadSales();
@@ -428,8 +428,13 @@ function AddSaleDialog({
   const [items, setItems] = useState<SaleDialogItem[]>([
     createSaleDialogItem(),
   ]);
-  const inventory = useMemo(() => productsService.getAll(), []);
-  const customers = useMemo(() => customersService.getAll(), []);
+  const [inventory, setInventory] = useState<Product[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+
+  useEffect(() => {
+    productsService.getAll().then(setInventory);
+    customersService.getAll().then(setCustomers);
+  }, []);
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
 
   const grandTotal = items.reduce((total, item) => total + item.total, 0);
@@ -498,7 +503,7 @@ function AddSaleDialog({
     );
   };
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
     const saleItems = items.map((item) => ({
@@ -508,7 +513,7 @@ function AddSaleDialog({
       total: Number(item.total) || 0,
     }));
 
-    salesService.create({
+    await salesService.create({
       date,
       customer: customer.trim(),
       items: saleItems,

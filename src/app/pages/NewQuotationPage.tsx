@@ -49,38 +49,51 @@ export default function NewQuotationPage() {
   });
 
   useEffect(() => {
-    setProducts(productsService.getAll().filter((p) => p.isActive));
-    setCustomers(
-      customersService
-        .getAll()
-        .sort((a, b) => a.name.localeCompare(b.name)),
+    let isMounted = true;
+    Promise.all([productsService.getAll(), customersService.getAll()]).then(
+      ([allProducts, allCustomers]) => {
+        if (!isMounted) return;
+        setProducts(allProducts.filter((p) => p.isActive));
+        setCustomers(allCustomers.sort((a, b) => a.name.localeCompare(b.name)));
+      },
     );
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
     if (!id) return;
+    let isMounted = true;
 
-    const quotation = quotationsService.getById(id);
-    if (!quotation) {
-      toast.error('Quotation not found');
-      navigate('/quotations');
-      return;
-    }
+    quotationsService.getById(id).then((quotation) => {
+      if (!isMounted) return;
 
-    if (quotation.status === 'CONFIRMED') {
-      toast.error('Confirmed quotations can only be viewed');
-      navigate(`/quotations/${quotation.id}`, { replace: true });
-      return;
-    }
+      if (!quotation) {
+        toast.error('Quotation not found');
+        navigate('/quotations');
+        return;
+      }
 
-    setFormData({
-      customerName: quotation.customerName,
-      issueDate: quotation.issueDate,
-      discount: quotation.discount ? String(quotation.discount) : '',
-      taxRate: quotation.taxRate ? String(quotation.taxRate) : '',
+      if (quotation.status === 'CONFIRMED') {
+        toast.error('Confirmed quotations can only be viewed');
+        navigate(`/quotations/${quotation.id}`, { replace: true });
+        return;
+      }
+
+      setFormData({
+        customerName: quotation.customerName,
+        issueDate: quotation.issueDate,
+        discount: quotation.discount ? String(quotation.discount) : '',
+        taxRate: quotation.taxRate ? String(quotation.taxRate) : '',
+      });
+      setSelectedCustomerId(quotation.customerId || 'manual');
+      setItems(quotation.items);
     });
-    setSelectedCustomerId(quotation.customerId || 'manual');
-    setItems(quotation.items);
+
+    return () => {
+      isMounted = false;
+    };
   }, [id, navigate]);
 
   useEffect(() => {
@@ -266,7 +279,7 @@ export default function NewQuotationPage() {
 
     try {
       if (id) {
-        const existingQuotation = quotationsService.getById(id);
+        const existingQuotation = await quotationsService.getById(id);
         if (!existingQuotation) {
           throw new Error('Quotation not found');
         }
@@ -275,7 +288,7 @@ export default function NewQuotationPage() {
           throw new Error('Confirmed quotations can only be viewed');
         }
 
-        const updatedQuotation = quotationsService.update(id, {
+        const updatedQuotation = await quotationsService.update(id, {
           customerId: selectedCustomerId !== 'manual' ? selectedCustomerId : undefined,
           customerName: formData.customerName,
           issueDate: formData.issueDate,
@@ -296,7 +309,7 @@ export default function NewQuotationPage() {
         toast.success('Quotation updated successfully');
         navigate(`/quotations/${updatedQuotation.id}`);
       } else {
-        const quotation = quotationsService.create({
+        const quotation = await quotationsService.create({
           customerId: selectedCustomerId !== 'manual' ? selectedCustomerId : undefined,
           customerName: formData.customerName,
           status: 'DRAFT',

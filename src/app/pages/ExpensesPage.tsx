@@ -101,8 +101,11 @@ export default function ExpensesPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('monthly');
   const [selectedWeek, setSelectedWeek] = useState(1);
   const [allExpenses, setAllExpenses] = useState<Expense[]>([]);
-  const [petitCash, setPetitCash] = useState<PetitCash>(petitCashService.get());
+  const [petitCash, setPetitCash] = useState<PetitCash>({ id: 'global', topUps: [], updatedAt: new Date().toISOString() });
   const [runningBalance, setRunningBalance] = useState(0);
+  const [monthTotal, setMonthTotal] = useState(0);
+  const [allTimeExpenses, setAllTimeExpenses] = useState(0);
+  const [topUpsTotal, setTopUpsTotal] = useState(0);
   const [showTopUpHistory, setShowTopUpHistory] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -124,10 +127,7 @@ export default function ExpensesPage() {
     },
     [allExpenses, selectedMonth, selectedWeek, viewMode],
   );
-  const monthTotal = expensesService.getMonthTotal(selectedMonth);
   const filteredTotal = expenses.reduce((total, expense) => total + expense.amount, 0);
-  const allTimeExpenses = expensesService.getAll().reduce((total, expense) => total + expense.amount, 0);
-  const topUpsTotal = petitCashService.getTotalTopUps();
   const totalCount = expenses.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const from = totalCount === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
@@ -139,10 +139,20 @@ export default function ExpensesPage() {
       ? `Total - Week ${selectedWeek} (${weekRangeLabel}): ${formatCurrency(filteredTotal)}`
       : `Total Expenses This Month: ${formatCurrency(monthTotal)}`;
 
-  const loadExpenses = () => {
-    setAllExpenses(expensesService.getAll().filter((expense) => expense.date.startsWith(selectedMonth)));
-    setPetitCash(petitCashService.get());
-    setRunningBalance(petitCashService.getRunningBalance());
+  const loadExpenses = async () => {
+    const [all, cash, balance, month, topUps] = await Promise.all([
+      expensesService.getAll(),
+      petitCashService.get(),
+      petitCashService.getRunningBalance(),
+      expensesService.getMonthTotal(selectedMonth),
+      petitCashService.getTotalTopUps(),
+    ]);
+    setAllExpenses(all.filter((expense) => expense.date.startsWith(selectedMonth)));
+    setAllTimeExpenses(all.reduce((total, expense) => total + expense.amount, 0));
+    setPetitCash(cash);
+    setRunningBalance(balance);
+    setMonthTotal(month);
+    setTopUpsTotal(topUps);
   };
 
   useEffect(() => {
@@ -168,10 +178,10 @@ export default function ExpensesPage() {
     setCurrentPage(1);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteExpenseId) return;
 
-    const success = expensesService.delete(deleteExpenseId);
+    const success = await expensesService.delete(deleteExpenseId);
     if (success) {
       toast.success('Expense deleted');
       loadExpenses();
@@ -181,8 +191,8 @@ export default function ExpensesPage() {
     setDeleteExpenseId(null);
   };
 
-  const removeTopUp = (id: string) => {
-    petitCashService.removeTopUp(id);
+  const removeTopUp = async (id: string) => {
+    await petitCashService.removeTopUp(id);
     toast.success('Top-up removed');
     loadExpenses();
   };
@@ -455,10 +465,10 @@ function AddExpenseDialog({
     }
   }, [open]);
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    expensesService.create({
+    await expensesService.create({
       date,
       details: details.trim(),
       amount: Number(amount),
@@ -541,11 +551,11 @@ function EditExpenseDialog({
     }
   }, [expense]);
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!expense) return;
 
-    const updated = expensesService.update(expense.id, {
+    const updated = await expensesService.update(expense.id, {
       date,
       details: details.trim(),
       amount: Number(amount),
@@ -630,10 +640,10 @@ function AddTopUpDialog({
     }
   }, [open]);
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    petitCashService.addTopUp(date, Number(amount), note.trim() || undefined);
+    await petitCashService.addTopUp(date, Number(amount), note.trim() || undefined);
     toast.success('Petit cash top-up added');
     onSuccess();
   };

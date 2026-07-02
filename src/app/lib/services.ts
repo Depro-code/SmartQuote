@@ -1,775 +1,832 @@
+import { supabase } from './supabaseClient';
 import type {
   Customer,
   Expense,
   PetitCash,
   Product,
   Quotation,
+  QuotationItem,
+  QuotationStatus,
+  SaleItem,
   SaleTransaction,
   SaleType,
   Settings,
   User,
 } from './types';
 
-// localStorage keys
-const KEYS = {
-  USERS: 'smartquote_users',
-  CURRENT_USER: 'smartquote_current_user',
-  SETTINGS: 'smartquote_settings',
-  PRODUCTS: 'smartquote_products',
-  CUSTOMERS: 'smartquote_customers',
-  QUOTATIONS: 'smartquote_quotations',
-  SALES: 'smartquote_sales',
-  EXPENSES: 'smartquote_expenses',
-  PETIT_CASH: 'smartquote_petit_cash',
-};
+// =====================================================================
+// Row <-> app-type mappers (DB is snake_case, app is camelCase)
+// =====================================================================
 
-const DEFAULT_SETTINGS: Settings = {
-  id: '1',
-  appName: 'SmartQuote Inventory',
-  companyName: 'AMEN-CAM LTD',
-  invoiceTitle: 'Proforma invoice no',
-  headerLine1: 'AMAZING MEDICAL EQUIPMENT NETWORK-CAM LIMITED',
-  headerLine2: 'Dealer in medical equipment, materials, contracts, import and general commerce',
-  headerLine3: 'Tax Payer\'s No. M052014422532X CNPS No. 370-0131792-000-R',
-  address: 'P.O Box 5210, Nkwen, Bamenda',
-  phone: '+237 679689100',
-  email: 'amencam77@gmail.com',
-  website: '',
-  registrationNumber: 'Tax Payer\'s No. M052014422532X CNPS No. 370-0131792-000-R',
-  taxId: '',
-  currency: 'XAF',
-  footerNote: '',
-};
-
-const LEGACY_SAMPLE_PRODUCT_NAMES = [
-  'Digital Blood Pressure Monitor',
-  'Disposable Surgical Gloves',
-  'Infrared Thermometer',
-];
-
-function createPlaceholderImage(label: string): string {
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
-      <rect width="400" height="300" fill="#f3f4f6" />
-      <rect x="24" y="24" width="352" height="252" rx="20" fill="#ffffff" stroke="#d1d5db" />
-      <text x="200" y="132" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" fill="#111827">
-        Amen-Cam
-      </text>
-      <text x="200" y="164" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#4b5563">
-        ${label}
-      </text>
-    </svg>
-  `;
-
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-}
-
-function createSeedProduct(
-  id: string,
-  name: string,
-  sku: string,
-  category: string,
-  unit: string,
-  unitPrice: number,
-  quantityInStock: number,
-  reorderLevel: number,
-  description: string,
-  brand = 'Amen-Cam',
-): Product {
-  const timestamp = new Date().toISOString();
+function toSettings(row: any): Settings {
   return {
-    id,
-    name,
-    sku,
-    category,
-    brand,
-    unit,
-    unitPrice,
-    quantityInStock,
-    reorderLevel,
-    description,
-    imageUrl: createPlaceholderImage(name),
-    isActive: true,
-    createdAt: timestamp,
-    updatedAt: timestamp,
+    id: String(row.id),
+    appName: row.app_name,
+    companyName: row.company_name,
+    invoiceTitle: row.invoice_title ?? undefined,
+    headerLine1: row.header_line1 ?? undefined,
+    headerLine2: row.header_line2 ?? undefined,
+    headerLine3: row.header_line3 ?? undefined,
+    address: row.address,
+    phone: row.phone,
+    email: row.email,
+    website: row.website ?? undefined,
+    registrationNumber: row.registration_number ?? undefined,
+    taxId: row.tax_id ?? undefined,
+    logoUrl: row.logo_url ?? undefined,
+    currency: row.currency,
+    footerNote: row.footer_note ?? undefined,
   };
 }
 
-const DEFAULT_SAMPLE_PRODUCTS: Product[] = [
-  createSeedProduct('1', 'Hospitalization bed with adjustable foam mattresses', 'AMC-BED-001', 'Furniture', 'unit', 235000, 12, 3, 'Adjustable hospitalization bed supplied with anti-bedsores foam mattress.'),
-  createSeedProduct('2', 'Bed pan Inox', 'AMC-BPN-002', 'Ward Care', 'unit', 22000, 30, 8, 'Stainless steel bed pan for patient care and hygiene.'),
-  createSeedProduct('3', 'Stainless steel dust pan (20 liters)', 'AMC-DPN-003', 'Waste Management', 'unit', 45000, 18, 4, '20-liter stainless steel dust pan for clinical and cleaning use.'),
-  createSeedProduct('4', 'Salter scale adult', 'AMC-SCL-004', 'Diagnostics', 'unit', 35000, 16, 4, 'Adult weighing scale for ward and consultation use.'),
-  createSeedProduct('5', 'Complete delivery kit', 'AMC-DLK-005', 'Maternity', 'kit', 35000, 20, 5, 'Complete delivery kit for maternity and labor procedures.'),
-  createSeedProduct('6', 'Minor surgical kit', 'AMC-MSK-006', 'Surgery', 'kit', 35000, 24, 6, 'Minor surgical instrument kit for routine interventions.'),
-  createSeedProduct('7', 'Stainless steel dressing trolley', 'AMC-TRY-007', 'Furniture', 'unit', 100000, 10, 2, 'Mobile stainless steel trolley for dressing and procedure support.'),
-  createSeedProduct('8', "Protected baby's cots", 'AMC-COT-008', 'Pediatrics', 'unit', 100000, 10, 2, 'Protected baby cot for neonatal and pediatric ward use.'),
-  createSeedProduct('9', 'Autoclave', 'AMC-AUT-009', 'Sterilization', 'unit', 225000, 4, 1, 'Autoclave for sterilization of instruments and consumables.'),
-  createSeedProduct('10', 'Electronic Footoscope', 'AMC-FOT-010', 'Diagnostics', 'unit', 75000, 8, 2, 'Electronic footoscope for specialized examination and care.'),
-  createSeedProduct('11', 'Bedside cupboard with drawers', 'AMC-BCD-011', 'Furniture', 'unit', 95000, 12, 3, 'Bedside cupboard with storage drawers for patient rooms.'),
-  createSeedProduct('12', 'Ward screen with movable joints', 'AMC-WSC-012', 'Furniture', 'unit', 100000, 10, 2, 'Ward privacy screen with movable joints and stable frame.'),
-  createSeedProduct('13', 'Delivery bed', 'AMC-DVB-013', 'Maternity', 'unit', 320000, 5, 1, 'Delivery bed designed for labor and maternity procedures.'),
-  createSeedProduct('14', 'Stretcher on wheel with adjustable stainless with drip stand', 'AMC-STR-014', 'Emergency', 'unit', 475000, 4, 1, 'Adjustable stainless stretcher on wheels with integrated drip stand.'),
-  createSeedProduct('15', 'Cotton', 'AMC-CTN-015', 'Consumables', 'pack', 3500, 120, 30, 'Absorbent cotton for medical dressing and procedure use.'),
-  createSeedProduct('16', 'Roll of Adhesive plaster', 'AMC-PLS-016', 'Consumables', 'roll', 2500, 240, 60, 'Medical adhesive plaster supplied in standard rolls.'),
-  createSeedProduct('17', 'Sterile gauze 40x40', 'AMC-GAZ-017', 'Consumables', 'pack', 500, 500, 150, 'Sterile 40x40 gauze for dressing and wound care.'),
-  createSeedProduct('18', 'Ambu bags', 'AMC-AMB-018', 'Emergency', 'unit', 35000, 15, 4, 'Manual resuscitator bag for emergency respiratory support.'),
-  createSeedProduct('19', 'Littmann stethoscope', 'AMC-STH-019', 'Diagnostics', 'unit', 22000, 14, 4, 'Littmann stethoscope for clinical auscultation.'),
-  createSeedProduct('20', 'Stainless steel Otoscope', 'AMC-OTO-020', 'Diagnostics', 'unit', 55000, 10, 2, 'Stainless steel otoscope for ear examination.'),
-  createSeedProduct('21', 'Iodine (surgical spirit) 500ml', 'AMC-IOD-021', 'Consumables', 'bottle', 1800, 200, 50, '500ml iodine surgical spirit for antiseptic preparation.'),
-];
-
-function createSeedCustomer(
-  id: string,
-  name: string,
-  company: string,
-  email: string,
-  phone: string,
-  address: string,
-  notes: string,
-): Customer {
-  const timestamp = new Date().toISOString();
+function toProduct(row: any): Product {
   return {
-    id,
-    name,
-    phone,
-    createdAt: timestamp,
-    updatedAt: timestamp,
+    id: row.id,
+    name: row.name,
+    sku: row.sku ?? undefined,
+    category: row.category ?? undefined,
+    brand: row.brand ?? undefined,
+    unit: row.unit ?? undefined,
+    unitPrice: Number(row.unit_price),
+    quantityInStock: row.quantity_in_stock,
+    reorderLevel: row.reorder_level ?? undefined,
+    description: row.description ?? undefined,
+    imageUrl: row.image_url ?? '',
+    isActive: row.is_active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
-const DEFAULT_CUSTOMERS: Customer[] = [
-  createSeedCustomer(
-    '1',
-    'Sandra Mbah',
-    'Northwind Traders',
-    'sandra@northwind.example',
-    '+237 670 100 201',
-    'Commercial Avenue, Bamenda',
-    'Prefers quotations by WhatsApp before email follow-up.',
-  ),
-  createSeedCustomer(
-    '2',
-    'Emmanuel Tabe',
-    'Summit Holdings',
-    'emmanuel@summit.example',
-    '+237 679 220 145',
-    'Bonanjo, Douala',
-    'Usually asks for 14-day validity on quotations.',
-  ),
-  createSeedCustomer(
-    '3',
-    'Lydia Fon',
-    'Greenline Ventures',
-    'lydia@greenline.example',
-    '+237 655 410 330',
-    'Mile 3, Buea',
-    'Main contact for repeat orders and urgent requests.',
-  ),
-  createSeedCustomer(
-    '4',
-    'Patrick Ndzi',
-    'Nkambe Council',
-    'procurement@nkambecouncil.example',
-    '+237 681 907 500',
-    'Nkambe, North West Region',
-    'Procurement office contact for municipal purchases.',
-  ),
-];
-
-function migrateLegacySettings(settings: Partial<Settings>): Partial<Settings> {
-  if (
-    settings.appName === DEFAULT_SETTINGS.appName &&
-    settings.companyName === 'Medical Equipment Solutions'
-  ) {
-    return { ...DEFAULT_SETTINGS, logoUrl: settings.logoUrl };
-  }
-  return settings;
+function toCustomer(row: any): Customer {
+  return {
+    id: row.id,
+    name: row.name,
+    phone: row.phone ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
-function shouldReplaceLegacySampleProducts(products: Product[]): boolean {
-  return (
-    products.length === LEGACY_SAMPLE_PRODUCT_NAMES.length &&
-    LEGACY_SAMPLE_PRODUCT_NAMES.every((name) => products.some((product) => product.name === name))
-  );
+function toQuotationItem(row: any): QuotationItem {
+  return {
+    productId: row.product_id,
+    nameSnapshot: row.name_snapshot,
+    unitPriceSnapshot: Number(row.unit_price_snapshot),
+    quantity: Number(row.quantity),
+    unitSnapshot: row.unit_snapshot ?? undefined,
+    lineTotal: Number(row.line_total),
+  };
 }
 
-// Initialize default data
-function initializeDefaults() {
-  // Default settings
-  if (!localStorage.getItem(KEYS.SETTINGS)) {
-    localStorage.setItem(KEYS.SETTINGS, JSON.stringify(DEFAULT_SETTINGS));
-  }
-
-  // Default admin user
-  if (!localStorage.getItem(KEYS.USERS)) {
-    const defaultUsers: User[] = [
-      {
-        id: '1',
-        email: 'admin@smartquote.com',
-        role: 'admin',
-        createdAt: new Date().toISOString(),
-      },
-    ];
-    localStorage.setItem(KEYS.USERS, JSON.stringify(defaultUsers));
-  }
-
-  // Sample products
-  if (!localStorage.getItem(KEYS.PRODUCTS)) {
-    localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(DEFAULT_SAMPLE_PRODUCTS));
-  } else {
-    const storedProducts = JSON.parse(localStorage.getItem(KEYS.PRODUCTS) || '[]') as Product[];
-    if (shouldReplaceLegacySampleProducts(storedProducts)) {
-      localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(DEFAULT_SAMPLE_PRODUCTS));
-    }
-  }
-
-  // Initialize empty quotations
-  if (!localStorage.getItem(KEYS.QUOTATIONS)) {
-    localStorage.setItem(KEYS.QUOTATIONS, JSON.stringify([]));
-  }
-
-  // Initialize empty sales
-  if (!localStorage.getItem(KEYS.SALES)) {
-    localStorage.setItem(KEYS.SALES, JSON.stringify([]));
-  }
-
-  // Initialize empty expenses
-  if (!localStorage.getItem(KEYS.EXPENSES)) {
-    localStorage.setItem(KEYS.EXPENSES, JSON.stringify([]));
-  }
-
-  // Initialize global petit cash record
-  if (!localStorage.getItem(KEYS.PETIT_CASH)) {
-    localStorage.setItem(
-      KEYS.PETIT_CASH,
-      JSON.stringify({ id: 'global', topUps: [], updatedAt: new Date().toISOString() }),
-    );
-  }
-
-  // Initialize customers
-  if (!localStorage.getItem(KEYS.CUSTOMERS)) {
-    localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(DEFAULT_CUSTOMERS));
-  } else {
-    const storedCustomers = JSON.parse(localStorage.getItem(KEYS.CUSTOMERS) || '[]') as Customer[];
-    if (storedCustomers.length === 0) {
-      localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(DEFAULT_CUSTOMERS));
-    }
-  }
+function toQuotation(row: any, items: QuotationItem[]): Quotation {
+  return {
+    id: row.id,
+    quoteNumber: row.quote_number,
+    customerId: row.customer_id ?? undefined,
+    customerName: row.customer_name,
+    customerPhone: row.customer_phone ?? undefined,
+    customerEmail: row.customer_email ?? undefined,
+    status: row.status as QuotationStatus,
+    issueDate: row.issue_date,
+    validUntil: row.valid_until ?? undefined,
+    items,
+    subTotal: Number(row.sub_total),
+    discount: row.discount != null ? Number(row.discount) : undefined,
+    taxRate: row.tax_rate != null ? Number(row.tax_rate) : undefined,
+    taxAmount: row.tax_amount != null ? Number(row.tax_amount) : undefined,
+    grandTotal: Number(row.grand_total),
+    notes: row.notes ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
-// Auth Service
+function toSaleItem(row: any): SaleItem {
+  return {
+    description: row.description,
+    quantity: row.quantity != null ? Number(row.quantity) : null,
+    unitPrice: Number(row.unit_price),
+    total: Number(row.total),
+  };
+}
+
+function toSale(row: any, items: SaleItem[]): SaleTransaction {
+  return {
+    id: row.id,
+    date: row.sale_date,
+    customer: row.customer_name,
+    items,
+    grandTotal: Number(row.grand_total),
+    type: row.type as SaleType,
+    week: row.week,
+    month: row.month,
+    quotationId: row.quotation_id ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toExpense(row: any): Expense {
+  return {
+    id: row.id,
+    date: row.expense_date,
+    details: row.details,
+    amount: Number(row.amount),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toUser(row: any, email: string): User {
+  return {
+    id: row.id,
+    email,
+    phone: row.phone,
+    fullName: row.full_name ?? undefined,
+    role: row.role,
+    createdAt: row.created_at,
+  };
+}
+
+function unwrap<T>(data: T | null, error: { message: string } | null): T {
+  if (error) throw new Error(error.message);
+  if (data === null) throw new Error('No data returned from Supabase');
+  return data;
+}
+
+// =====================================================================
+// Auth
+// =====================================================================
+
 export const authService = {
-  login: (email: string, password: string): User | null => {
-    initializeDefaults();
-    const users: User[] = JSON.parse(localStorage.getItem(KEYS.USERS) || '[]');
-    const user = users.find((u) => u.email === email);
-    
-    // Simple password check (for demo: password is "password123")
-    if (user && password === 'password123') {
-      localStorage.setItem(KEYS.CURRENT_USER, JSON.stringify(user));
-      return user;
-    }
-    return null;
+  getCurrentUser: async (): Promise<User | null> => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.user) return null;
+
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', session.user.id)
+      .single();
+
+    if (error || !profile) return null;
+    return toUser(profile, session.user.email ?? '');
   },
 
-  register: (email: string, password: string, role: 'admin' | 'staff' = 'staff'): User | null => {
-    initializeDefaults();
-    const users: User[] = JSON.parse(localStorage.getItem(KEYS.USERS) || '[]');
-    
-    if (users.find((u) => u.email === email)) {
-      return null; // User already exists
-    }
+  // Staff type their phone number + password. Under the hood: look up the
+  // matching email via get_email_by_phone(), then sign in normally.
+  loginWithPhone: async (phone: string, password: string): Promise<User | null> => {
+    const { data: email, error: lookupError } = await supabase.rpc('get_email_by_phone', {
+      p_phone: phone,
+    });
 
-    const newUser: User = {
-      id: Date.now().toString(),
+    if (lookupError || !email) return null;
+
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
       email,
-      role,
-      createdAt: new Date().toISOString(),
-    };
+      password,
+    });
 
-    users.push(newUser);
-    localStorage.setItem(KEYS.USERS, JSON.stringify(users));
-    localStorage.setItem(KEYS.CURRENT_USER, JSON.stringify(newUser));
-    return newUser;
+    if (signInError || !signInData.user) return null;
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', signInData.user.id)
+      .single();
+
+    if (profileError || !profile) return null;
+    return toUser(profile, signInData.user.email ?? '');
   },
 
-  logout: () => {
-    localStorage.removeItem(KEYS.CURRENT_USER);
+  logout: async (): Promise<void> => {
+    await supabase.auth.signOut();
   },
 
-  getCurrentUser: (): User | null => {
-    const userStr = localStorage.getItem(KEYS.CURRENT_USER);
-    return userStr ? JSON.parse(userStr) : null;
+  // Admin-only. Calls the create-staff Edge Function, which uses the
+  // service-role key server-side (a signed-in client can never create
+  // auth.users rows directly). The Edge Function itself re-checks that
+  // the caller is an admin before doing anything.
+  createStaff: async (params: {
+    phone: string;
+    email: string;
+    password: string;
+    fullName?: string;
+    role?: 'admin' | 'staff';
+  }): Promise<{ success: boolean; message?: string }> => {
+    const { data, error } = await supabase.functions.invoke('create-staff', {
+      body: params,
+    });
+
+    if (error) return { success: false, message: error.message };
+    return { success: true, ...(data as object) };
   },
 };
 
-// Settings Service
+// =====================================================================
+// Settings
+// =====================================================================
+
 export const settingsService = {
-  get: (): Settings => {
-    initializeDefaults();
-    const storedSettings = JSON.parse(localStorage.getItem(KEYS.SETTINGS) || '{}') as Partial<Settings>;
-    const migratedSettings = migrateLegacySettings(storedSettings);
-    const mergedSettings = { ...DEFAULT_SETTINGS, ...migratedSettings };
-    localStorage.setItem(KEYS.SETTINGS, JSON.stringify(mergedSettings));
-    return mergedSettings;
+  get: async (): Promise<Settings> => {
+    const { data, error } = await supabase.from('settings').select('*').eq('id', 1).single();
+    return toSettings(unwrap(data, error));
   },
 
-  update: (settings: Settings): Settings => {
-    localStorage.setItem(KEYS.SETTINGS, JSON.stringify(settings));
-    return settings;
+  update: async (settings: Settings): Promise<Settings> => {
+    const { data, error } = await supabase
+      .from('settings')
+      .update({
+        app_name: settings.appName,
+        company_name: settings.companyName,
+        invoice_title: settings.invoiceTitle,
+        header_line1: settings.headerLine1,
+        header_line2: settings.headerLine2,
+        header_line3: settings.headerLine3,
+        address: settings.address,
+        phone: settings.phone,
+        email: settings.email,
+        website: settings.website,
+        registration_number: settings.registrationNumber,
+        tax_id: settings.taxId,
+        logo_url: settings.logoUrl,
+        currency: settings.currency,
+        footer_note: settings.footerNote,
+      })
+      .eq('id', 1)
+      .select()
+      .single();
+
+    return toSettings(unwrap(data, error));
   },
 };
 
-// Products Service
+// =====================================================================
+// Products
+// =====================================================================
+
 export const productsService = {
-  getAll: (): Product[] => {
-    initializeDefaults();
-    return JSON.parse(localStorage.getItem(KEYS.PRODUCTS) || '[]');
+  getAll: async (): Promise<Product[]> => {
+    const { data, error } = await supabase.from('products').select('*').order('name');
+    return unwrap(data, error).map(toProduct);
   },
 
-  getById: (id: string): Product | null => {
-    const products = productsService.getAll();
-    return products.find((p) => p.id === id) || null;
+  getById: async (id: string): Promise<Product | null> => {
+    const { data, error } = await supabase.from('products').select('*').eq('id', id).maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? toProduct(data) : null;
   },
 
-  create: (product: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>): Product => {
-    const products = productsService.getAll();
-    const newProduct: Product = {
-      ...product,
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    products.push(newProduct);
-    localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(products));
-    return newProduct;
+  create: async (product: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>): Promise<Product> => {
+    const { data, error } = await supabase
+      .from('products')
+      .insert({
+        name: product.name,
+        sku: product.sku,
+        category: product.category,
+        brand: product.brand,
+        unit: product.unit,
+        unit_price: product.unitPrice,
+        quantity_in_stock: product.quantityInStock,
+        reorder_level: product.reorderLevel,
+        description: product.description,
+        image_url: product.imageUrl,
+        is_active: product.isActive,
+      })
+      .select()
+      .single();
+
+    return toProduct(unwrap(data, error));
   },
 
-  update: (id: string, updates: Partial<Product>): Product | null => {
-    const products = productsService.getAll();
-    const index = products.findIndex((p) => p.id === id);
-    
-    if (index === -1) return null;
+  update: async (id: string, updates: Partial<Product>): Promise<Product | null> => {
+    const payload: Record<string, unknown> = {};
+    if (updates.name !== undefined) payload.name = updates.name;
+    if (updates.sku !== undefined) payload.sku = updates.sku;
+    if (updates.category !== undefined) payload.category = updates.category;
+    if (updates.brand !== undefined) payload.brand = updates.brand;
+    if (updates.unit !== undefined) payload.unit = updates.unit;
+    if (updates.unitPrice !== undefined) payload.unit_price = updates.unitPrice;
+    if (updates.quantityInStock !== undefined) payload.quantity_in_stock = updates.quantityInStock;
+    if (updates.reorderLevel !== undefined) payload.reorder_level = updates.reorderLevel;
+    if (updates.description !== undefined) payload.description = updates.description;
+    if (updates.imageUrl !== undefined) payload.image_url = updates.imageUrl;
+    if (updates.isActive !== undefined) payload.is_active = updates.isActive;
 
-    products[index] = {
-      ...products[index],
-      ...updates,
-      updatedAt: new Date().toISOString(),
-    };
-    
-    localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(products));
-    return products[index];
+    const { data, error } = await supabase
+      .from('products')
+      .update(payload)
+      .eq('id', id)
+      .select()
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    return data ? toProduct(data) : null;
   },
 
-  delete: (id: string): boolean => {
-    const products = productsService.getAll();
-    const filtered = products.filter((p) => p.id !== id);
-    
-    if (filtered.length === products.length) return false;
-    
-    localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(filtered));
-    return true;
+  delete: async (id: string): Promise<boolean> => {
+    const { error, count } = await supabase.from('products').delete({ count: 'exact' }).eq('id', id);
+    if (error) throw new Error(error.message);
+    return (count ?? 0) > 0;
   },
 
-  search: (query: string): Product[] => {
-    const products = productsService.getAll();
-    const lowerQuery = query.toLowerCase();
-    return products.filter(
-      (p) =>
-        p.name.toLowerCase().includes(lowerQuery) ||
-        p.sku?.toLowerCase().includes(lowerQuery) ||
-        p.category?.toLowerCase().includes(lowerQuery)
-    );
+  search: async (query: string): Promise<Product[]> => {
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .or(`name.ilike.%${query}%,sku.ilike.%${query}%,category.ilike.%${query}%`);
+    return unwrap(data, error).map(toProduct);
   },
 
-  getLowStock: (): Product[] => {
-    const products = productsService.getAll();
-    return products.filter((p) => p.reorderLevel && p.quantityInStock <= p.reorderLevel);
+  getLowStock: async (): Promise<Product[]> => {
+    const all = await productsService.getAll();
+    return all.filter((p) => p.reorderLevel != null && p.quantityInStock <= p.reorderLevel);
   },
 
-  updateStock: (id: string, quantity: number): Product | null => {
+  updateStock: async (id: string, quantity: number): Promise<Product | null> => {
     return productsService.update(id, { quantityInStock: quantity });
   },
 };
 
-// Customers Service
+// =====================================================================
+// Customers
+// =====================================================================
+
 export const customersService = {
-  getAll: (): Customer[] => {
-    initializeDefaults();
-    return JSON.parse(localStorage.getItem(KEYS.CUSTOMERS) || '[]');
+  getAll: async (): Promise<Customer[]> => {
+    const { data, error } = await supabase.from('customers').select('*').order('name');
+    return unwrap(data, error).map(toCustomer);
   },
 
-  getById: (id: string): Customer | null => {
-    const customers = customersService.getAll();
-    return customers.find((customer) => customer.id === id) || null;
+  getById: async (id: string): Promise<Customer | null> => {
+    const { data, error } = await supabase.from('customers').select('*').eq('id', id).maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? toCustomer(data) : null;
   },
 
-  create: (customer: Omit<Customer, 'id' | 'createdAt' | 'updatedAt'>): Customer => {
-    const customers = customersService.getAll();
-    const now = new Date().toISOString();
-    const newCustomer: Customer = {
-      ...customer,
-      id: Date.now().toString(),
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    customers.push(newCustomer);
-    localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(customers));
-    return newCustomer;
+  create: async (customer: Omit<Customer, 'id' | 'createdAt' | 'updatedAt'>): Promise<Customer> => {
+    const { data, error } = await supabase
+      .from('customers')
+      .insert({ name: customer.name, phone: customer.phone })
+      .select()
+      .single();
+    return toCustomer(unwrap(data, error));
   },
 
-  update: (id: string, updates: Partial<Customer>): Customer | null => {
-    const customers = customersService.getAll();
-    const index = customers.findIndex((customer) => customer.id === id);
+  update: async (id: string, updates: Partial<Customer>): Promise<Customer | null> => {
+    const payload: Record<string, unknown> = {};
+    if (updates.name !== undefined) payload.name = updates.name;
+    if (updates.phone !== undefined) payload.phone = updates.phone;
 
-    if (index === -1) return null;
+    const { data, error } = await supabase
+      .from('customers')
+      .update(payload)
+      .eq('id', id)
+      .select()
+      .maybeSingle();
 
-    customers[index] = {
-      ...customers[index],
-      ...updates,
-      updatedAt: new Date().toISOString(),
-    };
-
-    localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(customers));
-    return customers[index];
+    if (error) throw new Error(error.message);
+    return data ? toCustomer(data) : null;
   },
 
-  delete: (id: string): boolean => {
-    const customers = customersService.getAll();
-    const filtered = customers.filter((customer) => customer.id !== id);
-
-    if (filtered.length === customers.length) return false;
-
-    localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(filtered));
-    return true;
+  delete: async (id: string): Promise<boolean> => {
+    const { error, count } = await supabase.from('customers').delete({ count: 'exact' }).eq('id', id);
+    if (error) throw new Error(error.message);
+    return (count ?? 0) > 0;
   },
 
-  search: (query: string): Customer[] => {
-    const customers = customersService.getAll();
-    const lowerQuery = query.toLowerCase();
-
-    return customers.filter(
-      (customer) =>
-        customer.name.toLowerCase().includes(lowerQuery) ||
-        customer.phone?.toLowerCase().includes(lowerQuery),
-    );
+  search: async (query: string): Promise<Customer[]> => {
+    const { data, error } = await supabase
+      .from('customers')
+      .select('*')
+      .or(`name.ilike.%${query}%,phone.ilike.%${query}%`);
+    return unwrap(data, error).map(toCustomer);
   },
 };
 
-// Quotations Service
+// =====================================================================
+// Quotations (+ quotation_items child table)
+// =====================================================================
+
+async function loadQuotationItems(quotationId: string): Promise<QuotationItem[]> {
+  const { data, error } = await supabase
+    .from('quotation_items')
+    .select('*')
+    .eq('quotation_id', quotationId)
+    .order('sort_order');
+  return unwrap(data, error).map(toQuotationItem);
+}
+
+async function hydrateQuotation(row: any): Promise<Quotation> {
+  const items = await loadQuotationItems(row.id);
+  return toQuotation(row, items);
+}
+
+function quotationItemsPayload(quotationId: string, items: QuotationItem[]) {
+  return items.map((item, index) => ({
+    quotation_id: quotationId,
+    product_id: item.productId,
+    name_snapshot: item.nameSnapshot,
+    unit_price_snapshot: item.unitPriceSnapshot,
+    unit_snapshot: item.unitSnapshot,
+    quantity: item.quantity,
+    line_total: item.lineTotal,
+    sort_order: index,
+  }));
+}
+
 export const quotationsService = {
-  getAll: (): Quotation[] => {
-    initializeDefaults();
-    return JSON.parse(localStorage.getItem(KEYS.QUOTATIONS) || '[]');
+  getAll: async (): Promise<Quotation[]> => {
+    const { data, error } = await supabase
+      .from('quotations')
+      .select('*')
+      .order('created_at', { ascending: false });
+    const rows = unwrap(data, error);
+    return Promise.all(rows.map(hydrateQuotation));
   },
 
-  getById: (id: string): Quotation | null => {
-    const quotations = quotationsService.getAll();
-    return quotations.find((q) => q.id === id) || null;
+  getById: async (id: string): Promise<Quotation | null> => {
+    const { data, error } = await supabase.from('quotations').select('*').eq('id', id).maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? hydrateQuotation(data) : null;
   },
 
-  create: (quotation: Omit<Quotation, 'id' | 'quoteNumber' | 'createdAt' | 'updatedAt'>): Quotation => {
-    const quotations = quotationsService.getAll();
-    
-    // Generate quote number
-    const year = new Date().getFullYear();
-    const count = quotations.filter((q) => q.quoteNumber.startsWith(`SQ-${year}`)).length + 1;
-    const quoteNumber = `SQ-${year}-${String(count).padStart(4, '0')}`;
+  create: async (
+    quotation: Omit<Quotation, 'id' | 'quoteNumber' | 'createdAt' | 'updatedAt'>,
+  ): Promise<Quotation> => {
+    const { data: qRow, error: qError } = await supabase
+      .from('quotations')
+      .insert({
+        customer_id: quotation.customerId,
+        customer_name: quotation.customerName,
+        customer_phone: quotation.customerPhone,
+        customer_email: quotation.customerEmail,
+        status: quotation.status,
+        issue_date: quotation.issueDate,
+        valid_until: quotation.validUntil,
+        sub_total: quotation.subTotal,
+        discount: quotation.discount,
+        tax_rate: quotation.taxRate,
+        tax_amount: quotation.taxAmount,
+        grand_total: quotation.grandTotal,
+        notes: quotation.notes,
+      })
+      .select()
+      .single();
 
-    const newQuotation: Quotation = {
-      ...quotation,
-      id: Date.now().toString(),
-      quoteNumber,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    
-    quotations.push(newQuotation);
-    localStorage.setItem(KEYS.QUOTATIONS, JSON.stringify(quotations));
-    return newQuotation;
-  },
+    const row = unwrap(qRow, qError);
 
-  update: (id: string, updates: Partial<Quotation>): Quotation | null => {
-    const quotations = quotationsService.getAll();
-    const index = quotations.findIndex((q) => q.id === id);
-    
-    if (index === -1) return null;
-
-    quotations[index] = {
-      ...quotations[index],
-      ...updates,
-      updatedAt: new Date().toISOString(),
-    };
-    
-    localStorage.setItem(KEYS.QUOTATIONS, JSON.stringify(quotations));
-    return quotations[index];
-  },
-
-  delete: (id: string): boolean => {
-    const quotations = quotationsService.getAll();
-    const filtered = quotations.filter((q) => q.id !== id);
-    
-    if (filtered.length === quotations.length) return false;
-    
-    localStorage.setItem(KEYS.QUOTATIONS, JSON.stringify(filtered));
-    return true;
-  },
-
-  search: (query: string): Quotation[] => {
-    const quotations = quotationsService.getAll();
-    const lowerQuery = query.toLowerCase();
-    return quotations.filter(
-      (q) =>
-        q.quoteNumber.toLowerCase().includes(lowerQuery) ||
-        q.customerName.toLowerCase().includes(lowerQuery) ||
-        q.customerPhone?.toLowerCase().includes(lowerQuery) ||
-        q.customerEmail?.toLowerCase().includes(lowerQuery)
-    );
-  },
-
-  getByStatus: (status: Quotation['status']): Quotation[] => {
-    const quotations = quotationsService.getAll();
-    return quotations.filter((q) => q.status === status);
-  },
-
-  getThisMonth: (): Quotation[] => {
-    const quotations = quotationsService.getAll();
-    const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-    return quotations.filter((q) => new Date(q.createdAt) >= firstDay);
-  },
-
-  confirmQuotation: (id: string): boolean => {
-    const quotation = quotationsService.getById(id);
-    if (!quotation || quotation.status === 'CONFIRMED') return false;
-
-    // Reduce stock quantities
-    quotation.items.forEach((item) => {
-      const product = productsService.getById(item.productId);
-      if (product) {
-        const newQuantity = Math.max(0, product.quantityInStock - item.quantity);
-        productsService.updateStock(item.productId, newQuantity);
-      }
-    });
-
-    const confirmationDate = new Date();
-    const date = confirmationDate.toISOString();
-    const confirmationDay = confirmationDate.getDate();
-    const week =
-      confirmationDay <= 7 ? 1 : confirmationDay <= 15 ? 2 : confirmationDay <= 22 ? 3 : 4;
-    const month = `${confirmationDate.getFullYear()}-${String(confirmationDate.getMonth() + 1).padStart(2, '0')}`;
-
-    salesService.create({
-      date,
-      customer: quotation.customerName,
-      items: quotation.items.map((item) => ({
-        description: item.nameSnapshot,
-        quantity: item.quantity,
-        unitPrice: item.unitPriceSnapshot,
-        total: item.lineTotal,
-      })),
-      grandTotal: quotation.grandTotal,
-      type: 'CASH',
-      week,
-      month,
-      quotationId: quotation.id,
-    });
-
-    // Update quotation status
-    quotationsService.update(id, { status: 'CONFIRMED' });
-    return true;
-  },
-};
-
-// Sales Service
-export const salesService = {
-  getAll: (): SaleTransaction[] => {
-    initializeDefaults();
-    return JSON.parse(localStorage.getItem(KEYS.SALES) || '[]');
-  },
-
-  getById: (id: string): SaleTransaction | null => {
-    const sales = salesService.getAll();
-    return sales.find((sale) => sale.id === id) || null;
-  },
-
-  getByMonth: (month: string): SaleTransaction[] => {
-    const sales = salesService.getAll();
-    return sales.filter((sale) => sale.month === month);
-  },
-
-  getByMonthAndWeek: (month: string, week: number): SaleTransaction[] => {
-    const sales = salesService.getByMonth(month);
-    return sales.filter((sale) => sale.week === week);
-  },
-
-  getByType: (month: string, type: SaleType): SaleTransaction[] => {
-    const sales = salesService.getByMonth(month);
-    return sales.filter((sale) => sale.type === type);
-  },
-
-  create: (data: Omit<SaleTransaction, 'id' | 'createdAt' | 'updatedAt'>): SaleTransaction => {
-    const sales = salesService.getAll();
-    const now = new Date().toISOString();
-    const newSale: SaleTransaction = {
-      ...data,
-      id: Date.now().toString(),
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    sales.push(newSale);
-    localStorage.setItem(KEYS.SALES, JSON.stringify(sales));
-    return newSale;
-  },
-
-  update: (id: string, updates: Partial<SaleTransaction>): SaleTransaction | null => {
-    const sales = salesService.getAll();
-    const index = sales.findIndex((sale) => sale.id === id);
-
-    if (index === -1) return null;
-
-    sales[index] = {
-      ...sales[index],
-      ...updates,
-      updatedAt: new Date().toISOString(),
-    };
-
-    localStorage.setItem(KEYS.SALES, JSON.stringify(sales));
-    return sales[index];
-  },
-
-  delete: (id: string): boolean => {
-    const sales = salesService.getAll();
-    const filtered = sales.filter((sale) => sale.id !== id);
-
-    if (filtered.length === sales.length) return false;
-
-    localStorage.setItem(KEYS.SALES, JSON.stringify(filtered));
-    return true;
-  },
-
-  getMonthSummary: (month: string): { cashTotal: number; creditTotal: number; grandTotal: number } => {
-    const sales = salesService.getByMonth(month);
-    const cashTotal = sales
-      .filter((sale) => sale.type === 'CASH')
-      .reduce((total, sale) => total + sale.grandTotal, 0);
-    const creditTotal = sales
-      .filter((sale) => sale.type === 'CREDIT')
-      .reduce((total, sale) => total + sale.grandTotal, 0);
-
-    return {
-      cashTotal,
-      creditTotal,
-      grandTotal: cashTotal + creditTotal,
-    };
-  },
-};
-
-// Expenses Service
-export const expensesService = {
-  getAll: (): Expense[] => {
-    initializeDefaults();
-    return JSON.parse(localStorage.getItem(KEYS.EXPENSES) || '[]');
-  },
-
-  getByDateRange: (from: string, to: string): Expense[] => {
-    const expenses = expensesService.getAll();
-    return expenses.filter((expense) => expense.date >= from && expense.date <= to);
-  },
-
-  create: (data: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'>): Expense => {
-    const expenses = expensesService.getAll();
-    const now = new Date().toISOString();
-    const newExpense: Expense = {
-      ...data,
-      id: Date.now().toString(),
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    expenses.push(newExpense);
-    localStorage.setItem(KEYS.EXPENSES, JSON.stringify(expenses));
-    return newExpense;
-  },
-
-  update: (id: string, updates: Partial<Expense>): Expense | null => {
-    const expenses = expensesService.getAll();
-    const index = expenses.findIndex((expense) => expense.id === id);
-
-    if (index === -1) return null;
-
-    expenses[index] = {
-      ...expenses[index],
-      ...updates,
-      updatedAt: new Date().toISOString(),
-    };
-
-    localStorage.setItem(KEYS.EXPENSES, JSON.stringify(expenses));
-    return expenses[index];
-  },
-
-  delete: (id: string): boolean => {
-    const expenses = expensesService.getAll();
-    const filtered = expenses.filter((expense) => expense.id !== id);
-
-    if (filtered.length === expenses.length) return false;
-
-    localStorage.setItem(KEYS.EXPENSES, JSON.stringify(filtered));
-    return true;
-  },
-
-  getMonthTotal: (month: string): number => {
-    const expenses = expensesService.getAll().filter((expense) => expense.date.startsWith(month));
-    return expenses.reduce((total, expense) => total + expense.amount, 0);
-  },
-};
-
-// Petit Cash Service
-export const petitCashService = {
-  get: (): PetitCash => {
-    const stored = localStorage.getItem(KEYS.PETIT_CASH);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (parsed?.id === 'global' && Array.isArray(parsed.topUps)) return parsed;
+    if (quotation.items.length > 0) {
+      const { error: itemsError } = await supabase
+        .from('quotation_items')
+        .insert(quotationItemsPayload(row.id, quotation.items));
+      if (itemsError) throw new Error(itemsError.message);
     }
 
-    const initial: PetitCash = { id: 'global', topUps: [], updatedAt: new Date().toISOString() };
-    localStorage.setItem(KEYS.PETIT_CASH, JSON.stringify(initial));
-    return initial;
+    return hydrateQuotation(row);
   },
 
-  addTopUp: (date: string, amount: number, note?: string): PetitCash => {
-    const record = petitCashService.get();
-    record.topUps.push({ id: Date.now().toString(), date, amount, note });
-    record.updatedAt = new Date().toISOString();
-    localStorage.setItem(KEYS.PETIT_CASH, JSON.stringify(record));
-    return record;
+  update: async (id: string, updates: Partial<Quotation>): Promise<Quotation | null> => {
+    const payload: Record<string, unknown> = {};
+    if (updates.customerId !== undefined) payload.customer_id = updates.customerId;
+    if (updates.customerName !== undefined) payload.customer_name = updates.customerName;
+    if (updates.customerPhone !== undefined) payload.customer_phone = updates.customerPhone;
+    if (updates.customerEmail !== undefined) payload.customer_email = updates.customerEmail;
+    if (updates.status !== undefined) payload.status = updates.status;
+    if (updates.issueDate !== undefined) payload.issue_date = updates.issueDate;
+    if (updates.validUntil !== undefined) payload.valid_until = updates.validUntil;
+    if (updates.subTotal !== undefined) payload.sub_total = updates.subTotal;
+    if (updates.discount !== undefined) payload.discount = updates.discount;
+    if (updates.taxRate !== undefined) payload.tax_rate = updates.taxRate;
+    if (updates.taxAmount !== undefined) payload.tax_amount = updates.taxAmount;
+    if (updates.grandTotal !== undefined) payload.grand_total = updates.grandTotal;
+    if (updates.notes !== undefined) payload.notes = updates.notes;
+
+    const { data, error } = await supabase
+      .from('quotations')
+      .update(payload)
+      .eq('id', id)
+      .select()
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    if (!data) return null;
+
+    if (updates.items) {
+      const { error: deleteError } = await supabase
+        .from('quotation_items')
+        .delete()
+        .eq('quotation_id', id);
+      if (deleteError) throw new Error(deleteError.message);
+
+      if (updates.items.length > 0) {
+        const { error: insertError } = await supabase
+          .from('quotation_items')
+          .insert(quotationItemsPayload(id, updates.items));
+        if (insertError) throw new Error(insertError.message);
+      }
+    }
+
+    return hydrateQuotation(data);
   },
 
-  removeTopUp: (id: string): PetitCash => {
-    const record = petitCashService.get();
-    record.topUps = record.topUps.filter((topUp) => topUp.id !== id);
-    record.updatedAt = new Date().toISOString();
-    localStorage.setItem(KEYS.PETIT_CASH, JSON.stringify(record));
-    return record;
+  delete: async (id: string): Promise<boolean> => {
+    const { error, count } = await supabase.from('quotations').delete({ count: 'exact' }).eq('id', id);
+    if (error) throw new Error(error.message);
+    return (count ?? 0) > 0;
   },
 
-  getRunningBalance: (): number => {
-    const record = petitCashService.get();
-    const totalTopUps = record.topUps.reduce((sum, topUp) => sum + topUp.amount, 0);
-    const totalExpenses = expensesService.getAll().reduce((sum, expense) => sum + expense.amount, 0);
-    return totalTopUps - totalExpenses;
+  search: async (query: string): Promise<Quotation[]> => {
+    const { data, error } = await supabase
+      .from('quotations')
+      .select('*')
+      .or(
+        `quote_number.ilike.%${query}%,customer_name.ilike.%${query}%,customer_phone.ilike.%${query}%,customer_email.ilike.%${query}%`,
+      );
+    const rows = unwrap(data, error);
+    return Promise.all(rows.map(hydrateQuotation));
   },
 
-  getTotalTopUps: (): number => {
-    return petitCashService.get().topUps.reduce((sum, topUp) => sum + topUp.amount, 0);
+  getByStatus: async (status: QuotationStatus): Promise<Quotation[]> => {
+    const { data, error } = await supabase.from('quotations').select('*').eq('status', status);
+    const rows = unwrap(data, error);
+    return Promise.all(rows.map(hydrateQuotation));
+  },
+
+  getThisMonth: async (): Promise<Quotation[]> => {
+    const firstDay = new Date();
+    firstDay.setDate(1);
+    firstDay.setHours(0, 0, 0, 0);
+
+    const { data, error } = await supabase
+      .from('quotations')
+      .select('*')
+      .gte('created_at', firstDay.toISOString());
+    const rows = unwrap(data, error);
+    return Promise.all(rows.map(hydrateQuotation));
+  },
+
+  // Fully atomic on the DB side: decrements stock, creates the sale + its
+  // items, and flips status to CONFIRMED, all in one transaction.
+  confirmQuotation: async (id: string): Promise<boolean> => {
+    const { error } = await supabase.rpc('confirm_quotation', { p_quotation_id: id });
+    return !error;
   },
 };
 
-// Image utilities
+// =====================================================================
+// Sales (+ sale_items child table)
+// =====================================================================
+
+async function loadSaleItems(saleId: string): Promise<SaleItem[]> {
+  const { data, error } = await supabase.from('sale_items').select('*').eq('sale_id', saleId);
+  return unwrap(data, error).map(toSaleItem);
+}
+
+async function hydrateSale(row: any): Promise<SaleTransaction> {
+  const items = await loadSaleItems(row.id);
+  return toSale(row, items);
+}
+
+export const salesService = {
+  getAll: async (): Promise<SaleTransaction[]> => {
+    const { data, error } = await supabase
+      .from('sales')
+      .select('*')
+      .order('sale_date', { ascending: false });
+    const rows = unwrap(data, error);
+    return Promise.all(rows.map(hydrateSale));
+  },
+
+  getById: async (id: string): Promise<SaleTransaction | null> => {
+    const { data, error } = await supabase.from('sales').select('*').eq('id', id).maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? hydrateSale(data) : null;
+  },
+
+  getByMonth: async (month: string): Promise<SaleTransaction[]> => {
+    const { data, error } = await supabase.from('sales').select('*').eq('month', month);
+    const rows = unwrap(data, error);
+    return Promise.all(rows.map(hydrateSale));
+  },
+
+  getByMonthAndWeek: async (month: string, week: number): Promise<SaleTransaction[]> => {
+    const { data, error } = await supabase
+      .from('sales')
+      .select('*')
+      .eq('month', month)
+      .eq('week', week);
+    const rows = unwrap(data, error);
+    return Promise.all(rows.map(hydrateSale));
+  },
+
+  getByType: async (month: string, type: SaleType): Promise<SaleTransaction[]> => {
+    const { data, error } = await supabase
+      .from('sales')
+      .select('*')
+      .eq('month', month)
+      .eq('type', type);
+    const rows = unwrap(data, error);
+    return Promise.all(rows.map(hydrateSale));
+  },
+
+  // Manual sale entry (not created via confirmQuotation).
+  create: async (
+    data: Omit<SaleTransaction, 'id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<SaleTransaction> => {
+    const { data: row, error } = await supabase
+      .from('sales')
+      .insert({
+        sale_date: data.date,
+        customer_name: data.customer,
+        grand_total: data.grandTotal,
+        type: data.type,
+        week: data.week,
+        month: data.month,
+        quotation_id: data.quotationId,
+      })
+      .select()
+      .single();
+
+    const saleRow = unwrap(row, error);
+
+    if (data.items.length > 0) {
+      const { error: itemsError } = await supabase.from('sale_items').insert(
+        data.items.map((item) => ({
+          sale_id: saleRow.id,
+          description: item.description,
+          quantity: item.quantity,
+          unit_price: item.unitPrice,
+          total: item.total,
+        })),
+      );
+      if (itemsError) throw new Error(itemsError.message);
+    }
+
+    return hydrateSale(saleRow);
+  },
+
+  update: async (id: string, updates: Partial<SaleTransaction>): Promise<SaleTransaction | null> => {
+    const payload: Record<string, unknown> = {};
+    if (updates.date !== undefined) payload.sale_date = updates.date;
+    if (updates.customer !== undefined) payload.customer_name = updates.customer;
+    if (updates.grandTotal !== undefined) payload.grand_total = updates.grandTotal;
+    if (updates.type !== undefined) payload.type = updates.type;
+    if (updates.week !== undefined) payload.week = updates.week;
+    if (updates.month !== undefined) payload.month = updates.month;
+
+    const { data, error } = await supabase
+      .from('sales')
+      .update(payload)
+      .eq('id', id)
+      .select()
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    return data ? hydrateSale(data) : null;
+  },
+
+  delete: async (id: string): Promise<boolean> => {
+    const { error, count } = await supabase.from('sales').delete({ count: 'exact' }).eq('id', id);
+    if (error) throw new Error(error.message);
+    return (count ?? 0) > 0;
+  },
+
+  getMonthSummary: async (
+    month: string,
+  ): Promise<{ cashTotal: number; creditTotal: number; grandTotal: number }> => {
+    const sales = await salesService.getByMonth(month);
+    const cashTotal = sales.filter((s) => s.type === 'CASH').reduce((t, s) => t + s.grandTotal, 0);
+    const creditTotal = sales.filter((s) => s.type === 'CREDIT').reduce((t, s) => t + s.grandTotal, 0);
+    return { cashTotal, creditTotal, grandTotal: cashTotal + creditTotal };
+  },
+};
+
+// =====================================================================
+// Expenses
+// =====================================================================
+
+export const expensesService = {
+  getAll: async (): Promise<Expense[]> => {
+    const { data, error } = await supabase
+      .from('expenses')
+      .select('*')
+      .order('expense_date', { ascending: false });
+    return unwrap(data, error).map(toExpense);
+  },
+
+  getByDateRange: async (from: string, to: string): Promise<Expense[]> => {
+    const { data, error } = await supabase
+      .from('expenses')
+      .select('*')
+      .gte('expense_date', from)
+      .lte('expense_date', to);
+    return unwrap(data, error).map(toExpense);
+  },
+
+  create: async (data: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'>): Promise<Expense> => {
+    const { data: row, error } = await supabase
+      .from('expenses')
+      .insert({ expense_date: data.date, details: data.details, amount: data.amount })
+      .select()
+      .single();
+    return toExpense(unwrap(row, error));
+  },
+
+  update: async (id: string, updates: Partial<Expense>): Promise<Expense | null> => {
+    const payload: Record<string, unknown> = {};
+    if (updates.date !== undefined) payload.expense_date = updates.date;
+    if (updates.details !== undefined) payload.details = updates.details;
+    if (updates.amount !== undefined) payload.amount = updates.amount;
+
+    const { data, error } = await supabase
+      .from('expenses')
+      .update(payload)
+      .eq('id', id)
+      .select()
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    return data ? toExpense(data) : null;
+  },
+
+  delete: async (id: string): Promise<boolean> => {
+    const { error, count } = await supabase.from('expenses').delete({ count: 'exact' }).eq('id', id);
+    if (error) throw new Error(error.message);
+    return (count ?? 0) > 0;
+  },
+
+  getMonthTotal: async (month: string): Promise<number> => {
+    const [year, monthNum] = month.split('-').map(Number);
+    const from = `${month}-01`;
+    const to = new Date(year, monthNum, 1).toISOString().slice(0, 10); // first day of next month
+
+    const { data, error } = await supabase
+      .from('expenses')
+      .select('amount')
+      .gte('expense_date', from)
+      .lt('expense_date', to);
+
+    const rows = unwrap(data, error);
+    return rows.reduce((total: number, r: any) => total + Number(r.amount), 0);
+  },
+};
+
+// =====================================================================
+// Petit Cash
+// =====================================================================
+
+export const petitCashService = {
+  get: async (): Promise<PetitCash> => {
+    const { data, error } = await supabase
+      .from('petit_cash_topups')
+      .select('*')
+      .order('topup_date', { ascending: false });
+    const rows = unwrap(data, error);
+    return {
+      id: 'global',
+      topUps: rows.map((r: any) => ({
+        id: r.id,
+        date: r.topup_date,
+        amount: Number(r.amount),
+        note: r.note ?? undefined,
+      })),
+      updatedAt: rows[0]?.created_at ?? new Date().toISOString(),
+    };
+  },
+
+  addTopUp: async (date: string, amount: number, note?: string): Promise<PetitCash> => {
+    const { error } = await supabase
+      .from('petit_cash_topups')
+      .insert({ topup_date: date, amount, note });
+    if (error) throw new Error(error.message);
+    return petitCashService.get();
+  },
+
+  removeTopUp: async (id: string): Promise<PetitCash> => {
+    const { error } = await supabase.from('petit_cash_topups').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+    return petitCashService.get();
+  },
+
+  getRunningBalance: async (): Promise<number> => {
+    const { data, error } = await supabase.from('petit_cash_balance').select('balance').single();
+    return Number(unwrap(data, error).balance);
+  },
+
+  getTotalTopUps: async (): Promise<number> => {
+    const { data, error } = await supabase.from('petit_cash_balance').select('total_topups').single();
+    return Number(unwrap(data, error).total_topups);
+  },
+};
+
+// =====================================================================
+// Image utilities (unchanged — purely client-side, no backend involved)
+// =====================================================================
+
 export const imageService = {
   convertToBase64: (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router';
+import { useNavigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
@@ -20,12 +20,12 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const success = await login(email, password);
+      const success = await login(phone, password);
       if (success) {
         toast.success('Login successful!');
         navigate('/dashboard');
       } else {
-        toast.error('Invalid email or password');
+        toast.error('Invalid phone number or password');
       }
     } catch (error) {
       toast.error('An error occurred during login');
@@ -46,13 +46,13 @@ export default function LoginPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="phone">Phone number</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="admin@smartquote.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="phone"
+                type="tel"
+                placeholder="+237679689100"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
                 required
               />
             </div>
@@ -78,17 +78,9 @@ export default function LoginPage() {
               )}
             </Button>
           </form>
-          <div className="mt-6 text-center text-sm text-gray-600">
-            <p>Demo credentials:</p>
-            <p className="mt-1">Email: admin@smartquote.com</p>
-            <p>Password: password123</p>
-          </div>
-          <div className="mt-4 text-center text-sm">
-            <span className="text-gray-600">Don't have an account? </span>
-            <Link to="/register" className="text-blue-600 hover:underline">
-              Register
-            </Link>
-          </div>
+          <p className="mt-6 text-center text-sm text-gray-600">
+            Accounts are created by an admin. Contact your admin if you need access.
+          </p>
         </CardContent>
       </Card>
     </div>

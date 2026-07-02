@@ -73,55 +73,58 @@ export default function CashReceiptPage() {
 
     const from = searchParams.get('from');
     const saleId = searchParams.get('saleId');
-    const loadedSettings = settingsService.get();
-    setSettings(loadedSettings);
 
-    if (from === 'sale' && saleId) {
-      const sale = salesService.getById(saleId);
-      if (!sale) {
-        toast.error('Sale not found');
+    (async () => {
+      const loadedSettings = await settingsService.get();
+      setSettings(loadedSettings);
+
+      if (from === 'sale' && saleId) {
+        const sale = await salesService.getById(saleId);
+        if (!sale) {
+          toast.error('Sale not found');
+          return;
+        }
+        const receipt = createReceiptRecord(undefined, sale.id);
+        setBackPath('/sales');
+        setQuotation({
+          id: receipt.id,
+          quoteNumber: receipt.quoteNumber,
+          customerName: sale.customer,
+          status: 'CONFIRMED',
+          issueDate: sale.date,
+          items: sale.items.map((item, index) => ({
+            productId: `sale-item-${index + 1}`,
+            nameSnapshot: item.description,
+            unitPriceSnapshot: item.unitPrice,
+            quantity: item.quantity ?? 1,
+            lineTotal: item.total,
+          })),
+          subTotal: sale.grandTotal,
+          grandTotal: sale.grandTotal,
+          createdAt: receipt.createdAt,
+          updatedAt: receipt.createdAt,
+        });
         return;
       }
-      const receipt = createReceiptRecord(undefined, sale.id);
-      setBackPath('/sales');
-      setQuotation({
-        id: receipt.id,
-        quoteNumber: receipt.quoteNumber,
-        customerName: sale.customer,
-        status: 'CONFIRMED',
-        issueDate: sale.date,
-        items: sale.items.map((item, index) => ({
-          productId: `sale-item-${index + 1}`,
-          nameSnapshot: item.description,
-          unitPriceSnapshot: item.unitPrice,
-          quantity: item.quantity ?? 1,
-          lineTotal: item.total,
-        })),
-        subTotal: sale.grandTotal,
-        grandTotal: sale.grandTotal,
-        createdAt: receipt.createdAt,
-        updatedAt: receipt.createdAt,
-      });
-      return;
-    }
 
-    if (from) {
-      const sourceQuotation = quotationsService.getById(from);
-      if (!sourceQuotation) {
-        toast.error('Quotation not found');
-        return;
+      if (from) {
+        const sourceQuotation = await quotationsService.getById(from);
+        if (!sourceQuotation) {
+          toast.error('Quotation not found');
+          return;
+        }
+        const receipt = createReceiptRecord(sourceQuotation.id);
+        setBackPath('/quotations');
+        setQuotation({
+          ...sourceQuotation,
+          id: receipt.id,
+          quoteNumber: receipt.quoteNumber,
+          status: 'CONFIRMED',
+          createdAt: receipt.createdAt,
+          updatedAt: receipt.createdAt,
+        });
       }
-      const receipt = createReceiptRecord(sourceQuotation.id);
-      setBackPath('/quotations');
-      setQuotation({
-        ...sourceQuotation,
-        id: receipt.id,
-        quoteNumber: receipt.quoteNumber,
-        status: 'CONFIRMED',
-        createdAt: receipt.createdAt,
-        updatedAt: receipt.createdAt,
-      });
-    }
+    })();
   }, [searchParams]);
 
   useEffect(() => {

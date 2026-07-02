@@ -78,11 +78,17 @@ export default function ProductsPage() {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
     if (searchQuery) {
-      setFilteredProducts(productsService.search(searchQuery));
+      productsService.search(searchQuery).then((results) => {
+        if (isMounted) setFilteredProducts(results);
+      });
     } else {
       setFilteredProducts(products);
     }
+    return () => {
+      isMounted = false;
+    };
   }, [searchQuery, products]);
 
   useEffect(() => {
@@ -93,8 +99,8 @@ export default function ProductsPage() {
     setCurrentPage((page) => Math.min(page, totalPages));
   }, [totalPages]);
 
-  const loadProducts = () => {
-    setProducts(productsService.getAll());
+  const loadProducts = async () => {
+    setProducts(await productsService.getAll());
   };
 
   const handleEdit = (product: Product) => {
@@ -106,9 +112,9 @@ export default function ProductsPage() {
     setDeleteProductId(id);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (deleteProductId) {
-      const success = productsService.delete(deleteProductId);
+      const success = await productsService.delete(deleteProductId);
       if (success) {
         toast.success('Product deleted successfully');
         loadProducts();
@@ -451,7 +457,7 @@ function EditProductDialog({
     e.preventDefault();
     if (!product) return;
 
-    const updated = productsService.update(product.id, formData);
+    const updated = await productsService.update(product.id, formData);
     if (updated) {
       toast.success('Product updated successfully');
       onSuccess();
@@ -608,4 +614,3 @@ function EditProductDialog({
     </Dialog>
   );
 }
-

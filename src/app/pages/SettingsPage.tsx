@@ -32,11 +32,17 @@ export default function SettingsPage() {
   });
 
   useEffect(() => {
-    const settings = settingsService.get();
-    setFormData(settings);
-    if (settings.logoUrl) {
-      setLogoPreview(settings.logoUrl);
-    }
+    let isMounted = true;
+    settingsService.get().then((settings) => {
+      if (!isMounted) return;
+      setFormData(settings);
+      if (settings.logoUrl) {
+        setLogoPreview(settings.logoUrl);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -57,7 +63,7 @@ export default function SettingsPage() {
     setLoading(true);
 
     try {
-      settingsService.update(formData);
+      await settingsService.update(formData);
       toast.success('Settings saved successfully');
     } catch (error) {
       toast.error('Failed to save settings');

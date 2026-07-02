@@ -93,9 +93,15 @@ export default function SaleDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    const foundSale = salesService.getById(id);
-    setSale(foundSale);
-    if (foundSale) setFormData(toFormState(foundSale));
+    let isMounted = true;
+    salesService.getById(id).then((foundSale) => {
+      if (!isMounted) return;
+      setSale(foundSale);
+      if (foundSale) setFormData(toFormState(foundSale));
+    });
+    return () => {
+      isMounted = false;
+    };
   }, [id]);
 
   if (!sale || !formData) {
@@ -156,10 +162,10 @@ export default function SaleDetailPage() {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!id) return;
 
-    const updated = salesService.update(id, {
+    const updated = await salesService.update(id, {
       date: formData.date,
       customer: formData.customer.trim(),
       type: formData.type,
@@ -190,10 +196,10 @@ export default function SaleDetailPage() {
     setIsEditing(false);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!id) return;
 
-    const success = salesService.delete(id);
+    const success = await salesService.delete(id);
     if (!success) {
       toast.error('Failed to delete sale');
       return;
@@ -203,10 +209,10 @@ export default function SaleDetailPage() {
     navigate('/sales');
   };
 
-  const handleGenerateQuotation = () => {
+  const handleGenerateQuotation = async () => {
     if (!id || !sale) return;
 
-    const quotation = quotationsService.create({
+    const quotation = await quotationsService.create({
       customerName: sale.customer,
       status: 'DRAFT',
       issueDate: toInputDate(sale.date),
@@ -221,7 +227,7 @@ export default function SaleDetailPage() {
       grandTotal: sale.grandTotal,
     });
 
-    const updatedSale = salesService.update(id, { quotationId: quotation.id });
+    const updatedSale = await salesService.update(id, { quotationId: quotation.id });
     if (updatedSale) {
       setSale(updatedSale);
       setFormData(toFormState(updatedSale));

@@ -43,17 +43,22 @@ export default function QuotationsPage() {
   }, []);
 
   useEffect(() => {
-    let filtered = quotations;
+    let isMounted = true;
+
+    const applyFilter = (base: Quotation[]) => {
+      const filtered = statusFilter !== 'all' ? base.filter((q) => q.status === statusFilter) : base;
+      if (isMounted) setFilteredQuotations(filtered);
+    };
 
     if (searchQuery) {
-      filtered = quotationsService.search(searchQuery);
+      quotationsService.search(searchQuery).then(applyFilter);
+    } else {
+      applyFilter(quotations);
     }
 
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter((q) => q.status === statusFilter);
-    }
-
-    setFilteredQuotations(filtered);
+    return () => {
+      isMounted = false;
+    };
   }, [searchQuery, statusFilter, quotations]);
 
   const totalCount = filteredQuotations.length;
@@ -73,9 +78,10 @@ export default function QuotationsPage() {
     setCurrentPage((page) => Math.min(page, totalPages));
   }, [totalPages]);
 
-  const loadQuotations = () => {
+  const loadQuotations = async () => {
+    const all = await quotationsService.getAll();
     setQuotations(
-      quotationsService.getAll().sort((a, b) => {
+      all.sort((a, b) => {
         if (a.status === 'CONFIRMED' && b.status !== 'CONFIRMED') return 1;
         if (a.status !== 'CONFIRMED' && b.status === 'CONFIRMED') return -1;
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
@@ -106,18 +112,18 @@ export default function QuotationsPage() {
     );
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteQuotationId) return;
 
     // get sale id if quotation has a linked sale
-    const linkedSale = salesService.getAll().find((sale) => sale.quotationId === deleteQuotationId);
+    const allSales = await salesService.getAll();
+    const linkedSale = allSales.find((sale) => sale.quotationId === deleteQuotationId);
     if (linkedSale) {
       // unlink the sale
-      salesService.update(linkedSale.id, { quotationId: undefined });
+      await salesService.update(linkedSale.id, { quotationId: undefined });
     }
 
-
-    const success = quotationsService.delete(deleteQuotationId);
+    const success = await quotationsService.delete(deleteQuotationId);
     if (success) {
       toast.success('Quotation deleted successfully');
       loadQuotations();

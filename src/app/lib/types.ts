@@ -72,7 +72,6 @@ export interface Quotation {
   taxAmount?: number;
   grandTotal: number;
   notes?: string;
-  pdfDataUrl?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -127,6 +126,8 @@ export type UserRole = 'admin' | 'staff';
 export interface User {
   id: string;
   email: string;
+  phone: string;
+  fullName?: string;
   role: UserRole;
   createdAt: string;
 }

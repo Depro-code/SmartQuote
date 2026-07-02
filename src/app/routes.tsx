@@ -27,7 +27,11 @@ export const router = createBrowserRouter([
   },
   {
     path: '/register',
-    element: <RegisterPage />,
+    element: (
+      <ProtectedRoute adminOnly>
+        <RegisterPage />
+      </ProtectedRoute>
+    ),
   },
   {
     path: '/dashboard',

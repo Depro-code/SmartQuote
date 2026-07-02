@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { ChevronLeft, ChevronRight, Edit, Plus, Search, Trash2, Users } from 'lucide-react';
 import { toast } from 'sonner';
@@ -61,19 +61,40 @@ export default function CustomersPage() {
     loadCustomers();
   }, []);
 
-  const quotationCounts = useMemo(() => {
-    const quotations = quotationsService.getAll();
-    return quotations.reduce<Record<string, number>>((accumulator, quotation) => {
-      if (quotation.customerId) {
-        accumulator[quotation.customerId] = (accumulator[quotation.customerId] || 0) + 1;
-      }
-      return accumulator;
-    }, {});
+  const [quotationCounts, setQuotationCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    let isMounted = true;
+    quotationsService.getAll().then((quotations) => {
+      if (!isMounted) return;
+      setQuotationCounts(
+        quotations.reduce<Record<string, number>>((accumulator, quotation) => {
+          if (quotation.customerId) {
+            accumulator[quotation.customerId] = (accumulator[quotation.customerId] || 0) + 1;
+          }
+          return accumulator;
+        }, {}),
+      );
+    });
+    return () => {
+      isMounted = false;
+    };
   }, [customers]);
 
-  const filteredCustomers = useMemo(() => {
-    if (!searchQuery) return customers;
-    return customersService.search(searchQuery);
+  const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!searchQuery) {
+      setFilteredCustomers(customers);
+      return;
+    }
+    customersService.search(searchQuery).then((results) => {
+      if (isMounted) setFilteredCustomers(results);
+    });
+    return () => {
+      isMounted = false;
+    };
   }, [customers, searchQuery]);
 
   const totalCount = filteredCustomers.length;
@@ -93,12 +114,9 @@ export default function CustomersPage() {
     setCurrentPage((page) => Math.min(page, totalPages));
   }, [totalPages]);
 
-  const loadCustomers = () => {
-    setCustomers(
-      customersService
-        .getAll()
-        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    );
+  const loadCustomers = async () => {
+    const all = await customersService.getAll();
+    setCustomers(all.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()));
   };
 
   const resetDialog = (open: boolean) => {
@@ -124,7 +142,7 @@ export default function CustomersPage() {
     setIsDialogOpen(true);
   };
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
     const payload = {
@@ -133,14 +151,14 @@ export default function CustomersPage() {
     };
 
     if (editingCustomer) {
-      const updated = customersService.update(editingCustomer.id, payload);
+      const updated = await customersService.update(editingCustomer.id, payload);
       if (!updated) {
         toast.error('Failed to update customer');
         return;
       }
       toast.success('Customer updated');
     } else {
-      customersService.create(payload);
+      await customersService.create(payload);
       toast.success('Customer created');
     }
 
@@ -148,12 +166,13 @@ export default function CustomersPage() {
     resetDialog(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteCustomerId) return;
 
-    const hasLinkedQuotations = quotationsService
-      .getAll()
-      .some((quotation) => quotation.customerId === deleteCustomerId);
+    const allQuotations = await quotationsService.getAll();
+    const hasLinkedQuotations = allQuotations.some(
+      (quotation) => quotation.customerId === deleteCustomerId,
+    );
 
     if (hasLinkedQuotations) {
       toast.error('This customer is linked to existing quotations');
@@ -161,7 +180,7 @@ export default function CustomersPage() {
       return;
     }
 
-    const success = customersService.delete(deleteCustomerId);
+    const success = await customersService.delete(deleteCustomerId);
     if (success) {
       toast.success('Customer deleted');
       loadCustomers();
