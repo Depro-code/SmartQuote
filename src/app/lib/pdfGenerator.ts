@@ -18,26 +18,45 @@ export async function generateQuotationPDF(
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageWidth = 210;
   const pageHeight = 297;
-  const pageMarginTop = 10;
-  const pageMarginBottom = 10;
+  // Small tolerance so that sub-pixel rendering differences from html2canvas
+  // (borders, line-height rounding, font metrics) don't tip a genuinely
+  // one-page document into the multi-page branch below.
+  const singlePageTolerance = 4;
+  const pageMarginTop = 0;
+  const pageMarginBottom = 0;
   const usablePageHeight = pageHeight - pageMarginTop - pageMarginBottom;
   const imgHeight = (canvas.height / canvas.width) * pageWidth;
 
-  if (imgHeight <= pageHeight) {
-    doc.addImage(imgData, 'JPEG', 0, 0, pageWidth, imgHeight);
+  if (imgHeight <= pageHeight + singlePageTolerance) {
+    doc.addImage(imgData, 'JPEG', 0, 0, pageWidth, Math.min(imgHeight, pageHeight));
     return doc;
   }
 
   const pageHeightPx = (canvas.width * usablePageHeight) / pageWidth;
   const elementRect = element.getBoundingClientRect();
   const scaleY = canvas.height / elementRect.height;
-  const keepTogetherRanges = Array.from(
-    element.querySelectorAll<HTMLElement>('[data-pdf-keep-together="true"]'),
-  ).map((keepElement) => {
+  const keepTogetherSelectors = element.querySelectorAll<HTMLElement>(
+    '[data-pdf-keep-together="true"]',
+  );
+  // Treat the bottom-right accent decoration as part of the last
+  // keep-together block too, so a page break can never cut through it.
+  const lastKeepTogetherEl = keepTogetherSelectors[keepTogetherSelectors.length - 1];
+  const bottomAccentEl = lastKeepTogetherEl
+    ? (lastKeepTogetherEl.parentElement?.parentElement?.querySelector<HTMLElement>(
+        ':scope > div:last-child',
+      ) ?? null)
+    : null;
+
+  const keepTogetherRanges = Array.from(keepTogetherSelectors).map((keepElement) => {
     const rect = keepElement.getBoundingClientRect();
+    let bottom = rect.bottom;
+    if (keepElement === lastKeepTogetherEl && bottomAccentEl) {
+      const accentRect = bottomAccentEl.getBoundingClientRect();
+      bottom = Math.max(bottom, accentRect.bottom);
+    }
     return {
       start: Math.max(0, (rect.top - elementRect.top) * scaleY),
-      end: Math.min(canvas.height, (rect.bottom - elementRect.top) * scaleY),
+      end: Math.min(canvas.height, (bottom - elementRect.top) * scaleY),
     };
   });
 
