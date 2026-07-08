@@ -20,11 +20,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, Search, Eye, Pencil, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Search, Eye, Pencil, Trash2, Loader2, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { format } from 'date-fns';
-import { AlertDialog } from '@radix-ui/react-alert-dialog';
-import { AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../components/ui/alert-dialog';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../components/ui/alert-dialog';
+import { LoadingButton } from '../components/ui/loading-button';
 import { toast } from 'sonner';
 
 const QUOTATIONS_PAGE_SIZE = 10;
@@ -37,6 +45,10 @@ export default function QuotationsPage() {
   const [filteredQuotations, setFilteredQuotations] = useState<Quotation[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [deleteQuotationId, setDeleteQuotationId] = useState<string | null>(null);
+  const [isPageLoading, setIsPageLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     loadQuotations();
@@ -51,8 +63,22 @@ export default function QuotationsPage() {
     };
 
     if (searchQuery) {
-      quotationsService.search(searchQuery).then(applyFilter);
+      setIsSearching(true);
+      quotationsService
+        .search(searchQuery)
+        .then((results) => {
+          applyFilter(results);
+        })
+        .catch((error) => {
+          if (isMounted) {
+            toast.error(error instanceof Error ? error.message : 'Search failed. Check your connection.');
+          }
+        })
+        .finally(() => {
+          if (isMounted) setIsSearching(false);
+        });
     } else {
+      setIsSearching(false);
       applyFilter(quotations);
     }
 
@@ -79,14 +105,30 @@ export default function QuotationsPage() {
   }, [totalPages]);
 
   const loadQuotations = async () => {
-    const all = await quotationsService.getAll();
-    setQuotations(
-      all.sort((a, b) => {
-        if (a.status === 'CONFIRMED' && b.status !== 'CONFIRMED') return 1;
-        if (a.status !== 'CONFIRMED' && b.status === 'CONFIRMED') return -1;
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      }),
-    );
+    setIsPageLoading(true);
+    setLoadError(null);
+    try {
+      const all = await quotationsService.getAll();
+      setQuotations(
+        all.sort((a, b) => {
+          if (a.status === 'CONFIRMED' && b.status !== 'CONFIRMED') return 1;
+          if (a.status !== 'CONFIRMED' && b.status === 'CONFIRMED') return -1;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        }),
+      );
+    } catch (error) {
+      // A failed request and "no quotations exist" must never look the
+      // same — one is your connection, the other is real data. Silently
+      // showing an empty table for both is how you don't find out your
+      // network dropped until someone asks why a sale is missing.
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to load quotations. Check your connection and try again.',
+      );
+    } finally {
+      setIsPageLoading(false);
+    }
   };
 
   const formatCurrency = (amount: number) => {
@@ -115,22 +157,29 @@ export default function QuotationsPage() {
   const confirmDelete = async () => {
     if (!deleteQuotationId) return;
 
-    // get sale id if quotation has a linked sale
-    const allSales = await salesService.getAll();
-    const linkedSale = allSales.find((sale) => sale.quotationId === deleteQuotationId);
-    if (linkedSale) {
-      // unlink the sale
-      await salesService.update(linkedSale.id, { quotationId: undefined });
-    }
+    setIsDeleting(true);
+    try {
+      // get sale id if quotation has a linked sale
+      const allSales = await salesService.getAll();
+      const linkedSale = allSales.find((sale) => sale.quotationId === deleteQuotationId);
+      if (linkedSale) {
+        // unlink the sale
+        await salesService.update(linkedSale.id, { quotationId: undefined });
+      }
 
-    const success = await quotationsService.delete(deleteQuotationId);
-    if (success) {
-      toast.success('Quotation deleted successfully');
-      loadQuotations();
-    } else {
-      toast.error('Error deleting quotation');
+      const success = await quotationsService.delete(deleteQuotationId);
+      if (success) {
+        toast.success('Quotation deleted successfully');
+        await loadQuotations();
+      } else {
+        toast.error('Error deleting quotation');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Error deleting quotation');
+    } finally {
+      setIsDeleting(false);
+      setDeleteQuotationId(null);
     }
-    setDeleteQuotationId(null);
   };
 
   return (
@@ -150,7 +199,11 @@ export default function QuotationsPage() {
 
         <div className="mt-3 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            {isSearching ? (
+              <Loader2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+            ) : (
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            )}
             <Input
               placeholder="Search by quote number, customer..."
               value={searchQuery}
@@ -177,6 +230,24 @@ export default function QuotationsPage() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]">
+            {isPageLoading ? (
+              <div className="flex h-[420px] items-center justify-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading quotations…
+              </div>
+            ) : loadError ? (
+              <div className="flex h-[420px] flex-col items-center justify-center gap-3 px-4 text-center text-muted-foreground">
+                <AlertCircle className="h-6 w-6 text-destructive" />
+                <p>{loadError}</p>
+                <Button variant="outline" size="sm" onClick={loadQuotations}>
+                  Retry
+                </Button>
+              </div>
+            ) : paginatedQuotations.length === 0 ? (
+              <div className="flex h-[420px] items-center justify-center text-muted-foreground">
+                No quotations found
+              </div>
+            ) : (
             <Table className="min-w-[980px] border-separate border-spacing-0">
               <TableHeader className="sticky top-0 z-20 bg-card">
                 <TableRow className="hover:bg-transparent">
@@ -190,13 +261,7 @@ export default function QuotationsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginatedQuotations.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="h-[420px] text-center text-muted-foreground">
-                      No quotations found
-                    </TableCell>
-                  </TableRow>
-                ) : (
+                {
                   paginatedQuotations.map((quotation) => (
                     <TableRow key={quotation.id} className="group hover:bg-muted/40" 
                       onClick={() => navigate(`/quotations/${quotation.id}`)}
@@ -250,9 +315,10 @@ export default function QuotationsPage() {
                       </TableCell>
                     </TableRow>
                   ))
-                )}
+                }
               </TableBody>
             </Table>
+            )}
           </div>
 
         <div className="border-t border-border bg-card px-4 py-3 sm:px-5">
@@ -286,7 +352,12 @@ export default function QuotationsPage() {
         </div>
       </div>
 
-      <AlertDialog open={!!deleteQuotationId} onOpenChange={() => setDeleteQuotationId(null)}>
+      <AlertDialog
+        open={!!deleteQuotationId}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) setDeleteQuotationId(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Quotation</AlertDialogTitle>
@@ -295,10 +366,10 @@ export default function QuotationsPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700">
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <LoadingButton variant="destructive" onClick={confirmDelete} isLoading={isDeleting}>
               Delete
-            </AlertDialogAction>
+            </LoadingButton>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

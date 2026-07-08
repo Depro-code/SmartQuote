@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
-import { ChevronLeft, ChevronRight, Edit, Plus, Search, Trash2, Users } from 'lucide-react';
+import { AlertCircle, ChevronLeft, ChevronRight, Edit, Loader2, Plus, Search, Trash2, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { Button } from '../components/ui/button';
+import { LoadingButton } from '../components/ui/loading-button';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -46,7 +46,7 @@ const EMPTY_FORM: CustomerFormState = {
   phone: '',
 };
 
-const CUSTOMERS_PAGE_SIZE = 10;
+const CUSTOMERS_PAGE_SIZE = 40;
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -56,6 +56,9 @@ export default function CustomersPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [formData, setFormData] = useState<CustomerFormState>(EMPTY_FORM);
   const [currentPage, setCurrentPage] = useState(1);
+  const [isPageLoading, setIsPageLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     loadCustomers();
@@ -65,17 +68,27 @@ export default function CustomersPage() {
 
   useEffect(() => {
     let isMounted = true;
-    quotationsService.getAll().then((quotations) => {
-      if (!isMounted) return;
-      setQuotationCounts(
-        quotations.reduce<Record<string, number>>((accumulator, quotation) => {
-          if (quotation.customerId) {
-            accumulator[quotation.customerId] = (accumulator[quotation.customerId] || 0) + 1;
-          }
-          return accumulator;
-        }, {}),
-      );
-    });
+    quotationsService
+      .getAll()
+      .then((quotations) => {
+        if (!isMounted) return;
+        setQuotationCounts(
+          quotations.reduce<Record<string, number>>((accumulator, quotation) => {
+            if (quotation.customerId) {
+              accumulator[quotation.customerId] = (accumulator[quotation.customerId] || 0) + 1;
+            }
+            return accumulator;
+          }, {}),
+        );
+      })
+      .catch((error) => {
+        if (!isMounted) return;
+        // Non-critical to the page's core job (listing customers), so
+        // this doesn't block the table - just don't let it fail silently.
+        toast.error(
+          error instanceof Error ? error.message : 'Failed to load quote counts for customers.',
+        );
+      });
     return () => {
       isMounted = false;
     };
@@ -89,9 +102,16 @@ export default function CustomersPage() {
       setFilteredCustomers(customers);
       return;
     }
-    customersService.search(searchQuery).then((results) => {
-      if (isMounted) setFilteredCustomers(results);
-    });
+    customersService
+      .search(searchQuery)
+      .then((results) => {
+        if (isMounted) setFilteredCustomers(results);
+      })
+      .catch((error) => {
+        if (isMounted) {
+          toast.error(error instanceof Error ? error.message : 'Search failed. Check your connection.');
+        }
+      });
     return () => {
       isMounted = false;
     };
@@ -115,8 +135,20 @@ export default function CustomersPage() {
   }, [totalPages]);
 
   const loadCustomers = async () => {
-    const all = await customersService.getAll();
-    setCustomers(all.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()));
+    setIsPageLoading(true);
+    setLoadError(null);
+    try {
+      const all = await customersService.getAll();
+      setCustomers(all.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()));
+    } catch (error) {
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to load customers. Check your connection and try again.',
+      );
+    } finally {
+      setIsPageLoading(false);
+    }
   };
 
   const resetDialog = (open: boolean) => {
@@ -142,6 +174,8 @@ export default function CustomersPage() {
     setIsDialogOpen(true);
   };
 
+  const [isSaving, setIsSaving] = useState(false);
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
@@ -150,44 +184,63 @@ export default function CustomersPage() {
       phone: formData.phone.trim() || undefined,
     };
 
-    if (editingCustomer) {
-      const updated = await customersService.update(editingCustomer.id, payload);
-      if (!updated) {
-        toast.error('Failed to update customer');
-        return;
+    setIsSaving(true);
+    try {
+      if (editingCustomer) {
+        const updated = await customersService.update(editingCustomer.id, payload);
+        if (!updated) {
+          toast.error('Failed to update customer');
+          return;
+        }
+        toast.success('Customer updated');
+      } else {
+        await customersService.create(payload);
+        toast.success('Customer created');
       }
-      toast.success('Customer updated');
-    } else {
-      await customersService.create(payload);
-      toast.success('Customer created');
-    }
 
-    loadCustomers();
-    resetDialog(false);
+      await loadCustomers();
+      resetDialog(false);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : editingCustomer
+            ? 'Failed to update customer'
+            : 'Failed to create customer',
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const confirmDelete = async () => {
     if (!deleteCustomerId) return;
 
-    const allQuotations = await quotationsService.getAll();
-    const hasLinkedQuotations = allQuotations.some(
-      (quotation) => quotation.customerId === deleteCustomerId,
-    );
+    setIsDeleting(true);
+    try {
+      const allQuotations = await quotationsService.getAll();
+      const hasLinkedQuotations = allQuotations.some(
+        (quotation) => quotation.customerId === deleteCustomerId,
+      );
 
-    if (hasLinkedQuotations) {
-      toast.error('This customer is linked to existing quotations');
+      if (hasLinkedQuotations) {
+        toast.error('This customer is linked to existing quotations');
+        return;
+      }
+
+      const success = await customersService.delete(deleteCustomerId);
+      if (success) {
+        toast.success('Customer deleted');
+        await loadCustomers();
+      } else {
+        toast.error('Failed to delete customer');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete customer');
+    } finally {
+      setIsDeleting(false);
       setDeleteCustomerId(null);
-      return;
     }
-
-    const success = await customersService.delete(deleteCustomerId);
-    if (success) {
-      toast.success('Customer deleted');
-      loadCustomers();
-    } else {
-      toast.error('Failed to delete customer');
-    }
-    setDeleteCustomerId(null);
   };
 
   return (
@@ -227,6 +280,24 @@ export default function CustomersPage() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]">
+            {isPageLoading ? (
+              <div className="flex h-[420px] items-center justify-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading customers…
+              </div>
+            ) : loadError ? (
+              <div className="flex h-[420px] flex-col items-center justify-center gap-3 px-4 text-center text-muted-foreground">
+                <AlertCircle className="h-6 w-6 text-destructive" />
+                <p>{loadError}</p>
+                <Button variant="outline" size="sm" onClick={loadCustomers}>
+                  Retry
+                </Button>
+              </div>
+            ) : paginatedCustomers.length === 0 ? (
+              <div className="flex h-[420px] items-center justify-center text-muted-foreground">
+                No customers found
+              </div>
+            ) : (
             <Table className="min-w-[980px] border-separate border-spacing-0">
               <TableHeader className="sticky top-0 z-20 bg-card">
                 <TableRow className="hover:bg-transparent">
@@ -238,14 +309,7 @@ export default function CustomersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginatedCustomers.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="h-[420px] text-center text-muted-foreground">
-                      No customers found
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  paginatedCustomers.map((customer) => (
+                {paginatedCustomers.map((customer) => (
                     <TableRow key={customer.id} className="group hover:bg-muted/40">
                       <TableCell className="px-4 py-3">
                         <div className="font-medium text-foreground">{customer.name}</div>
@@ -275,10 +339,10 @@ export default function CustomersPage() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
+                  ))}
               </TableBody>
             </Table>
+            )}
           </div>
 
         <div className="border-t border-border bg-card px-4 py-3 sm:px-5">
@@ -342,16 +406,23 @@ export default function CustomersPage() {
             </div>
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => resetDialog(false)}>
+              <Button type="button" variant="outline" onClick={() => resetDialog(false)} disabled={isSaving}>
                 Cancel
               </Button>
-              <Button type="submit">{editingCustomer ? 'Save Changes' : 'Create Customer'}</Button>
+              <LoadingButton type="submit" isLoading={isSaving}>
+                {editingCustomer ? 'Save Changes' : 'Create Customer'}
+              </LoadingButton>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!deleteCustomerId} onOpenChange={() => setDeleteCustomerId(null)}>
+      <AlertDialog
+        open={!!deleteCustomerId}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) setDeleteCustomerId(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Customer</AlertDialogTitle>
@@ -361,10 +432,15 @@ export default function CustomersPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700">
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <LoadingButton
+              variant="destructive"
+              onClick={confirmDelete}
+              isLoading={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
               Delete
-            </AlertDialogAction>
+            </LoadingButton>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

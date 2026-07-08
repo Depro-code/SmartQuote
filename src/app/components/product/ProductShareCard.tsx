@@ -1,5 +1,6 @@
 import { forwardRef, type CSSProperties } from 'react';
 import type { Product } from '../../lib/types';
+import { ProductImage } from './ProductImage';
 
 const productCardStyle: CSSProperties = {
   width: '960px',
@@ -30,9 +31,9 @@ export const ProductShareCard = forwardRef<
           borderRight: '2px solid rgba(245, 158, 11, 0.35)',
         }}
       >
-        <img
-          src={product.imageUrl}
-          alt={product.name}
+        <ProductImage
+          imageUrl={product.imageUrl}
+          name={product.name}
           style={{
             width: '100%',
             height: '320px',
@@ -40,6 +41,7 @@ export const ProductShareCard = forwardRef<
             borderRadius: '22px',
             background: '#ffffff',
             border: '1px solid rgba(251, 191, 36, 0.45)',
+            fontSize: '56px',
           }}
         />
       </div>
@@ -97,8 +99,6 @@ export const ProductShareCard = forwardRef<
         >
           <ProductMeta label="Price" value={formatCurrency(product.unitPrice)} />
           <ProductMeta label="Unit" value={product.unit || 'unit'} />
-          <ProductMeta label="Category" value={product.category || 'General'} />
-          <ProductMeta label="SKU" value={product.sku || 'N/A'} />
           <ProductMeta label="Stock" value={String(product.quantityInStock)} />
           <ProductMeta label="Brand" value={product.brand || 'Amen-Cam'} />
         </div>

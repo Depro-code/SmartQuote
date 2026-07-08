@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { productsService, imageService } from '../lib/services';
-import type { Product } from '../lib/types';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import { LoadingButton } from '../components/ui/loading-button';
 import { Textarea } from '../components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { toast } from 'sonner';
@@ -17,8 +17,6 @@ export default function NewProductPage() {
   const [imagePreview, setImagePreview] = useState<string>('');
   const [formData, setFormData] = useState({
     name: '',
-    sku: '',
-    category: '',
     brand: '',
     unit: 'piece',
     unitPrice: '',
@@ -53,10 +51,10 @@ export default function NewProductPage() {
     setLoading(true);
 
     try {
-      const product = productsService.create({
+      await productsService.create({
         name: formData.name,
-        sku: formData.sku || undefined,
-        category: formData.category || undefined,
+        sku: null,
+        category: null,
         brand: formData.brand || undefined,
         unit: formData.unit || undefined,
         unitPrice: Number(formData.unitPrice),
@@ -70,7 +68,7 @@ export default function NewProductPage() {
       toast.success('Product created successfully');
       navigate('/products');
     } catch (error) {
-      toast.error('Failed to create product');
+      toast.error(error instanceof Error ? error.message : 'Failed to create product');
     } finally {
       setLoading(false);
     }
@@ -145,26 +143,6 @@ export default function NewProductPage() {
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                       required
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="sku">SKU</Label>
-                    <Input
-                      id="sku"
-                      value={formData.sku}
-                      onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                      placeholder="e.g., BP-001"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="category">Category</Label>
-                    <Input
-                      id="category"
-                      value={formData.category}
-                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                      placeholder="e.g., Diagnostics"
                     />
                   </div>
 
@@ -252,13 +230,14 @@ export default function NewProductPage() {
               </div>
 
               <div className="flex gap-4">
-                <Button type="submit" disabled={loading}>
-                  {loading ? 'Creating...' : 'Create Product'}
-                </Button>
+                <LoadingButton type="submit" isLoading={loading}>
+                  Create Product
+                </LoadingButton>
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => navigate('/products')}
+                  disabled={loading}
                 >
                   Cancel
                 </Button>

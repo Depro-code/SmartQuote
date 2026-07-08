@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { ChevronDown, ChevronLeft, ChevronRight, Edit, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, ChevronDown, ChevronLeft, ChevronRight, Edit, Loader2, Plus, Trash2 } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -13,6 +12,7 @@ import {
   AlertDialogTitle,
 } from '../components/ui/alert-dialog';
 import { Button } from '../components/ui/button';
+import { LoadingButton } from '../components/ui/loading-button';
 import {
   Dialog,
   DialogContent,
@@ -112,6 +112,10 @@ export default function ExpensesPage() {
   const [isTopUpDialogOpen, setIsTopUpDialogOpen] = useState(false);
   const [editExpense, setEditExpense] = useState<Expense | null>(null);
   const [deleteExpenseId, setDeleteExpenseId] = useState<string | null>(null);
+  const [isPageLoading, setIsPageLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [removingTopUpId, setRemovingTopUpId] = useState<string | null>(null);
 
   const expenses = useMemo(
     () => {
@@ -140,19 +144,30 @@ export default function ExpensesPage() {
       : `Total Expenses This Month: ${formatCurrency(monthTotal)}`;
 
   const loadExpenses = async () => {
-    const [all, cash, balance, month, topUps] = await Promise.all([
-      expensesService.getAll(),
-      petitCashService.get(),
-      petitCashService.getRunningBalance(),
-      expensesService.getMonthTotal(selectedMonth),
-      petitCashService.getTotalTopUps(),
-    ]);
-    setAllExpenses(all.filter((expense) => expense.date.startsWith(selectedMonth)));
-    setAllTimeExpenses(all.reduce((total, expense) => total + expense.amount, 0));
-    setPetitCash(cash);
-    setRunningBalance(balance);
-    setMonthTotal(month);
-    setTopUpsTotal(topUps);
+    setIsPageLoading(true);
+    try {
+      const [all, cash, balance, month, topUps] = await Promise.all([
+        expensesService.getAll(),
+        petitCashService.get(),
+        petitCashService.getRunningBalance(),
+        expensesService.getMonthTotal(selectedMonth),
+        petitCashService.getTotalTopUps(),
+      ]);
+      setAllExpenses(all.filter((expense) => expense.date.startsWith(selectedMonth)));
+      setAllTimeExpenses(all.reduce((total, expense) => total + expense.amount, 0));
+      setPetitCash(cash);
+      setRunningBalance(balance);
+      setMonthTotal(month);
+      setTopUpsTotal(topUps);
+    } catch (error) {
+      setLoadError (
+        error instanceof Error
+          ? error.message
+          : 'Failed to load expenses. Check your connection and try again.',
+      )
+    } finally {
+      setIsPageLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -181,20 +196,30 @@ export default function ExpensesPage() {
   const confirmDelete = async () => {
     if (!deleteExpenseId) return;
 
-    const success = await expensesService.delete(deleteExpenseId);
-    if (success) {
-      toast.success('Expense deleted');
-      loadExpenses();
-    } else {
-      toast.error('Failed to delete expense');
+    setIsDeleting(true);
+    try {
+      const success = await expensesService.delete(deleteExpenseId);
+      if (success) {
+        toast.success('Expense deleted');
+        await loadExpenses();
+      } else {
+        toast.error('Failed to delete expense');
+      }
+    } finally {
+      setIsDeleting(false);
+      setDeleteExpenseId(null);
     }
-    setDeleteExpenseId(null);
   };
 
   const removeTopUp = async (id: string) => {
-    await petitCashService.removeTopUp(id);
-    toast.success('Top-up removed');
-    loadExpenses();
+    setRemovingTopUpId(id);
+    try {
+      await petitCashService.removeTopUp(id);
+      toast.success('Top-up removed');
+      await loadExpenses();
+    } finally {
+      setRemovingTopUpId(null);
+    }
   };
 
   return (
@@ -280,15 +305,18 @@ export default function ExpensesPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-foreground">{formatCurrency(topUp.amount)}</span>
-                        <Button
+                        <LoadingButton
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8"
                           onClick={() => removeTopUp(topUp.id)}
+                          isLoading={removingTopUpId === topUp.id}
+                          iconOnly
+                          disabled={removingTopUpId !== null}
                           aria-label="Delete top-up"
                         >
                           <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                        </LoadingButton>
                       </div>
                     </div>
                   ))
@@ -299,6 +327,24 @@ export default function ExpensesPage() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]">
+          {isPageLoading ? (
+            <div className="flex h-[420px] items-center justify-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading expenses…
+            </div>
+          ) : loadError ? (
+            <div className="flex h-[420px] flex-col items-center justify-center gap-3 px-4 text-center text-muted-foreground">
+              <AlertCircle className="h-6 w-6 text-destructive" />
+              <p>{loadError}</p>
+              <Button variant="outline" size="sm" onClick={loadExpenses}>
+                Retry
+              </Button>
+            </div>
+          ) : paginatedExpenses.length === 0 ? (
+            <div className="flex h-[420px] items-center justify-center text-muted-foreground">
+                No expenses found
+            </div>
+          ) : (
           <Table className="min-w-[820px] border-separate border-spacing-0">
             <TableHeader className="sticky top-0 z-20 bg-card">
               <TableRow className="hover:bg-transparent">
@@ -310,14 +356,7 @@ export default function ExpensesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {paginatedExpenses.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="h-[420px] text-center text-muted-foreground">
-                    No expenses found
-                  </TableCell>
-                </TableRow>
-              ) : (
-                paginatedExpenses.map((expense, index) => (
+              {paginatedExpenses.map((expense, index) => (
                   <TableRow key={expense.id} className="group hover:bg-muted/40">
                     <TableCell className="px-4 py-3 text-muted-foreground">
                       {(currentPage - 1) * PAGE_SIZE + index + 1}
@@ -353,9 +392,10 @@ export default function ExpensesPage() {
                     </TableCell>
                   </TableRow>
                 ))
-              )}
+              }
             </TableBody>
           </Table>
+          )}
         </div>
 
         <div className="border-t border-border bg-card px-4 py-3 sm:px-5">
@@ -424,7 +464,12 @@ export default function ExpensesPage() {
         }}
       />
 
-      <AlertDialog open={!!deleteExpenseId} onOpenChange={() => setDeleteExpenseId(null)}>
+      <AlertDialog
+        open={!!deleteExpenseId}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) setDeleteExpenseId(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Expense</AlertDialogTitle>
@@ -433,10 +478,14 @@ export default function ExpensesPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700">
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <LoadingButton
+              variant="destructive"
+              onClick={confirmDelete}
+              isLoading={isDeleting}
+            >
               Delete
-            </AlertDialogAction>
+            </LoadingButton>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -456,6 +505,7 @@ function AddExpenseDialog({
   const [date, setDate] = useState(getTodayInputValue());
   const [details, setDetails] = useState('');
   const [amount, setAmount] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -468,18 +518,23 @@ function AddExpenseDialog({
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    await expensesService.create({
-      date,
-      details: details.trim(),
-      amount: Number(amount),
-    });
+    setIsSaving(true);
+    try {
+      await expensesService.create({
+        date,
+        details: details.trim(),
+        amount: Number(amount),
+      });
 
-    toast.success('Expense added');
-    onSuccess();
+      toast.success('Expense added');
+      onSuccess();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => { if (!next && isSaving) return; onOpenChange(next); }}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Add Expense</DialogTitle>
@@ -517,10 +572,10 @@ function AddExpenseDialog({
             />
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
               Cancel
             </Button>
-            <Button type="submit">Save Expense</Button>
+            <LoadingButton type="submit" isLoading={isSaving}>Save Expense</LoadingButton>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -542,6 +597,7 @@ function EditExpenseDialog({
   const [date, setDate] = useState(getTodayInputValue());
   const [details, setDetails] = useState('');
   const [amount, setAmount] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (expense) {
@@ -555,22 +611,27 @@ function EditExpenseDialog({
     event.preventDefault();
     if (!expense) return;
 
-    const updated = await expensesService.update(expense.id, {
-      date,
-      details: details.trim(),
-      amount: Number(amount),
-    });
+    setIsSaving(true);
+    try {
+      const updated = await expensesService.update(expense.id, {
+        date,
+        details: details.trim(),
+        amount: Number(amount),
+      });
 
-    if (updated) {
-      toast.success('Expense updated');
-      onSuccess();
-    } else {
-      toast.error('Failed to update expense');
+      if (updated) {
+        toast.success('Expense updated');
+        onSuccess();
+      } else {
+        toast.error('Failed to update expense');
+      }
+    } finally {
+      setIsSaving(false);
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => { if (!next && isSaving) return; onOpenChange(next); }}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Edit Expense</DialogTitle>
@@ -608,10 +669,10 @@ function EditExpenseDialog({
             />
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
               Cancel
             </Button>
-            <Button type="submit">Save Changes</Button>
+            <LoadingButton type="submit" isLoading={isSaving}>Save Changes</LoadingButton>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -631,6 +692,7 @@ function AddTopUpDialog({
   const [date, setDate] = useState(getTodayInputValue());
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -643,13 +705,18 @@ function AddTopUpDialog({
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    await petitCashService.addTopUp(date, Number(amount), note.trim() || undefined);
-    toast.success('Petit cash top-up added');
-    onSuccess();
+    setIsSaving(true);
+    try {
+      await petitCashService.addTopUp(date, Number(amount), note.trim() || undefined);
+      toast.success('Petit cash top-up added');
+      onSuccess();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => { if (!next && isSaving) return; onOpenChange(next); }}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Add Top-up</DialogTitle>
@@ -686,10 +753,10 @@ function AddTopUpDialog({
             />
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
               Cancel
             </Button>
-            <Button type="submit">Save Top-up</Button>
+            <LoadingButton type="submit" isLoading={isSaving}>Save Top-up</LoadingButton>
           </DialogFooter>
         </form>
       </DialogContent>

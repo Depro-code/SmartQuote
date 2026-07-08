@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { DashboardLayout } from '../components/DashboardLayout';
-import { quotationsService, settingsService } from '../lib/services';
-import type { Quotation, Settings } from '../lib/types';
+import { quotationsService, receiptsService, salesService, settingsService } from '../lib/services';
+import type { CashReceipt, Quotation, SaleType, Settings } from '../lib/types';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import {
@@ -22,12 +22,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../components/ui/alert-dialog';
-import { ArrowLeft, Download, Printer, Share2, CheckCircle, Loader2, Pencil } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Download, Printer, Share2, CheckCircle, Loader2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { PrintableQuotationDocument } from '../components/quotation/PrintableQuotationDocument';
 import { generateQuotationPDF, quotationPdfFilename } from '../lib/pdfGenerator';
 import { format } from 'date-fns';
 import { useIsMobile } from '../components/ui/use-mobile';
+import { RadioGroup, RadioGroupItem } from '../components/ui/radio-group';
+import { Label } from '../components/ui/label';
 
 export default function ViewQuotationPage() {
   const { id } = useParams<{ id: string }>();
@@ -36,23 +38,81 @@ export default function ViewQuotationPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [confirmSaleType, setConfirmSaleType] = useState<SaleType>('CASH');
   const [sharePdfBlob, setSharePdfBlob] = useState<Blob | null>(null);
+  const [isPageLoading, setIsPageLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [existingReceipt, setExistingReceipt] = useState<CashReceipt | null>(null);
   const documentRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 
-  useEffect(() => {
-    if (id) {
-      let isMounted = true;
-      Promise.all([quotationsService.getById(id), settingsService.get()]).then(([q, s]) => {
+  const loadQuotation = () => {
+    if (!id) {
+      setIsPageLoading(false);
+      return () => {};
+    }
+
+    let isMounted = true;
+    setIsPageLoading(true);
+    setLoadError(null);
+
+    Promise.all([quotationsService.getById(id), settingsService.get()])
+      .then(([q, s]) => {
         if (!isMounted) return;
         setQuotation(q);
         setSettings(s);
+      })
+      .catch((error) => {
+        if (!isMounted) return;
+        // A network hiccup must never look identical to "this quotation
+        // doesn't exist" - one is worth retrying, the other sends the
+        // user back to the list for nothing.
+        setLoadError(
+          error instanceof Error
+            ? error.message
+            : 'Failed to load quotation. Check your connection and try again.',
+        );
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setIsPageLoading(false);
       });
-      return () => {
-        isMounted = false;
-      };
-    }
+
+    return () => {
+      isMounted = false;
+    };
+  };
+
+  useEffect(() => {
+    const cleanup = loadQuotation();
+    return cleanup;
   }, [id]);
+
+  useEffect(() => {
+    if (!quotation || quotation.status !== 'CONFIRMED') {
+      setExistingReceipt(null);
+      return;
+    }
+
+    let isMounted = true;
+    (async () => {
+      try {
+        const linkedSale = await salesService.getByQuotationId(quotation.id);
+        const receipt = await receiptsService.findExisting({
+          quotationId: quotation.id,
+          saleId: linkedSale?.id,
+        });
+        if (isMounted) setExistingReceipt(receipt);
+      } catch {
+        // Non-fatal to the page - worst case the button just says
+        // "Generate" and CashReceiptPage resolves it correctly anyway.
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [quotation]);
 
   useEffect(() => {
     if (!isMobile || !quotation || !settings) return;
@@ -78,6 +138,31 @@ export default function ViewQuotationPage() {
       cancelled = true;
     };
   }, [isMobile, quotation, settings]);
+
+  if (isPageLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center gap-2 py-24 text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading quotation…
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <DashboardLayout>
+        <div className="flex flex-col items-center justify-center gap-3 py-24 text-center text-muted-foreground">
+          <AlertCircle className="h-6 w-6 text-destructive" />
+          <p>{loadError}</p>
+          <Button variant="outline" size="sm" onClick={loadQuotation}>
+            Retry
+          </Button>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   if (!quotation) {
     return (
@@ -182,6 +267,7 @@ export default function ViewQuotationPage() {
 
   const handleStatusChange = async (newStatus: Quotation['status']) => {
     if (newStatus === 'CONFIRMED' && quotation.status !== 'CONFIRMED') {
+      setConfirmSaleType('CASH');
       setShowConfirmDialog(true);
       return;
     }
@@ -195,12 +281,12 @@ export default function ViewQuotationPage() {
   };
 
   const confirmQuotation = async () => {
-    const success = await quotationsService.confirmQuotation(quotation.id);
+    const success = await quotationsService.confirmQuotation(quotation.id, confirmSaleType);
     if (success) {
       const updated = await quotationsService.getById(quotation.id);
       if (updated) {
         setQuotation(updated);
-        toast.success('Quotation confirmed and stock updated');
+        toast.success(`Quotation confirmed as a ${confirmSaleType.toLowerCase()} sale and stock updated`);
       }
     } else {
       toast.error('Failed to confirm quotation');
@@ -272,7 +358,7 @@ export default function ViewQuotationPage() {
           )}
           {quotation.status === 'CONFIRMED' && (
             <Button variant="outline" onClick={() => navigate(`/receipts/new?from=${quotation.id}`)}>
-              Generate Cash Receipt
+              {existingReceipt ? 'View Receipt' : 'Generate Cash Receipt'}
             </Button>
           )}
           <Button onClick={handleExportPDF} disabled={loading}>
@@ -297,7 +383,7 @@ export default function ViewQuotationPage() {
           )}
         </div>
 
-        <div className="rounded-[2rem] bg-gradient-to-br from-slate-100 via-slate-50 to-white p-4 sm:p-6">
+        <div className="rounded-[2rem] bg-gradient-to-br from-slate-100 via-slate-50 to-white p-4 sm:p-6 overflow-x-auto">
           {settings && (
             <PrintableQuotationDocument
               ref={documentRef}
@@ -313,10 +399,27 @@ export default function ViewQuotationPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm Quotation</AlertDialogTitle>
             <AlertDialogDescription>
-              Confirming this quotation will reduce the stock quantities for all items. This action
-              cannot be undone. Do you want to proceed?
+              Confirming this quotation will reduce the stock quantities for all items and record it
+              as a sale. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="py-2">
+            <Label className="mb-2 block text-sm font-medium">Payment type</Label>
+            <RadioGroup
+              value={confirmSaleType}
+              onValueChange={(value) => setConfirmSaleType(value as SaleType)}
+              className="flex gap-6"
+            >
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="CASH" id="sale-type-cash" />
+                <Label htmlFor="sale-type-cash" className="font-normal">Cash</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="CREDIT" id="sale-type-credit" />
+                <Label htmlFor="sale-type-credit" className="font-normal">Credit</Label>
+              </div>
+            </RadioGroup>
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={confirmQuotation}>

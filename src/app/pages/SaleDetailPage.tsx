@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
-import { ArrowLeft, Edit, Plus, Save, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Edit, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -15,6 +14,7 @@ import {
 } from '../components/ui/alert-dialog';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
+import { LoadingButton } from '../components/ui/loading-button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import {
@@ -32,8 +32,8 @@ import {
   TableHeader,
   TableRow,
 } from '../components/ui/table';
-import { quotationsService, salesService } from '../lib/services';
-import type { SaleItem, SaleTransaction, SaleType } from '../lib/types';
+import { quotationsService, receiptsService, salesService } from '../lib/services';
+import type { CashReceipt, SaleItem, SaleTransaction, SaleType } from '../lib/types';
 
 type SaleFormState = {
   date: string;
@@ -90,19 +90,58 @@ export default function SaleDetailPage() {
   const [formData, setFormData] = useState<SaleFormState | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [isGeneratingQuotation, setIsGeneratingQuotation] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isPageLoading, setIsPageLoading] = useState(true);
+  const [existingReceipt, setExistingReceipt] = useState<CashReceipt | null>(null);
 
   useEffect(() => {
     if (!id) return;
     let isMounted = true;
+    setIsPageLoading(true);
     salesService.getById(id).then((foundSale) => {
       if (!isMounted) return;
       setSale(foundSale);
       if (foundSale) setFormData(toFormState(foundSale));
+      setIsPageLoading(false);
     });
     return () => {
       isMounted = false;
     };
   }, [id]);
+
+  useEffect(() => {
+    if (!sale) {
+      setExistingReceipt(null);
+      return;
+    }
+
+    let isMounted = true;
+    receiptsService
+      .findExisting({ saleId: sale.id, quotationId: sale.quotationId })
+      .then((receipt) => {
+        if (isMounted) setExistingReceipt(receipt);
+      })
+      .catch(() => {
+        // Non-fatal - worst case the button says "Generate" and
+        // CashReceiptPage resolves the existing receipt correctly anyway.
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [sale]);
+
+  if (isPageLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center gap-2 py-24 text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading sale…
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   if (!sale || !formData) {
     return (
@@ -165,30 +204,37 @@ export default function SaleDetailPage() {
   const handleSave = async () => {
     if (!id) return;
 
-    const updated = await salesService.update(id, {
-      date: formData.date,
-      customer: formData.customer.trim(),
-      type: formData.type,
-      week: formData.week,
-      month: getMonthFromDate(formData.date),
-      items: formData.items.map((item) => ({
-        description: item.description.trim(),
-        quantity: item.quantity,
-        unitPrice: Number(item.unitPrice) || 0,
-        total: Number(item.total) || 0,
-      })),
-      grandTotal,
-    });
+    setIsSaving(true);
+    try {
+      const updated = await salesService.update(id, {
+        date: formData.date,
+        customer: formData.customer.trim(),
+        type: formData.type,
+        week: formData.week,
+        month: getMonthFromDate(formData.date),
+        items: formData.items.map((item) => ({
+          description: item.description.trim(),
+          quantity: item.quantity,
+          unitPrice: Number(item.unitPrice) || 0,
+          total: Number(item.total) || 0,
+        })),
+        grandTotal,
+      });
 
-    if (!updated) {
-      toast.error('Failed to update sale');
-      return;
+      if (!updated) {
+        toast.error('Failed to update sale');
+        return;
+      }
+
+      setSale(updated);
+      setFormData(toFormState(updated));
+      setIsEditing(false);
+      toast.success('Sale updated');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update sale');
+    } finally {
+      setIsSaving(false);
     }
-
-    setSale(updated);
-    setFormData(toFormState(updated));
-    setIsEditing(false);
-    toast.success('Sale updated');
   };
 
   const handleCancel = () => {
@@ -199,42 +245,60 @@ export default function SaleDetailPage() {
   const handleDelete = async () => {
     if (!id) return;
 
-    const success = await salesService.delete(id);
-    if (!success) {
-      toast.error('Failed to delete sale');
-      return;
-    }
+    setIsDeleting(true);
+    try {
+      const success = await salesService.delete(id);
+      if (!success) {
+        toast.error('Failed to delete sale');
+        return;
+      }
 
-    toast.success('Sale deleted');
-    navigate('/sales');
+      toast.success('Sale deleted');
+      navigate('/sales');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete sale');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const handleGenerateQuotation = async () => {
     if (!id || !sale) return;
 
-    const quotation = await quotationsService.create({
-      customerName: sale.customer,
-      status: 'DRAFT',
-      issueDate: toInputDate(sale.date),
-      items: sale.items.map((item, index) => ({
-        productId: `sale-item-${index + 1}`,
-        nameSnapshot: item.description,
-        unitPriceSnapshot: item.unitPrice,
-        quantity: item.quantity ?? 1,
-        lineTotal: item.total,
-      })),
-      subTotal: sale.grandTotal,
-      grandTotal: sale.grandTotal,
-    });
+    setIsGeneratingQuotation(true);
+    try {
+      const quotation = await quotationsService.create({
+        customerName: sale.customer,
+        status: 'DRAFT',
+        issueDate: toInputDate(sale.date),
+        items: sale.items.map((item) => ({
+          nameSnapshot: item.description,
+          unitPriceSnapshot: item.unitPrice,
+          quantity: item.quantity ?? 1,
+          lineTotal: item.total,
+        })),
+        subTotal: sale.grandTotal,
+        grandTotal: sale.grandTotal,
+      });
 
-    const updatedSale = await salesService.update(id, { quotationId: quotation.id });
-    if (updatedSale) {
-      setSale(updatedSale);
-      setFormData(toFormState(updatedSale));
+      const updatedSale = await salesService.update(id, { quotationId: quotation.id });
+      if (updatedSale) {
+        setSale(updatedSale);
+        setFormData(toFormState(updatedSale));
+      } else {
+        // The quotation now exists but the link back to this sale failed
+        // to save — surface it instead of pretending everything's fine,
+        // since that mismatch is exactly what caused this bug last time.
+        toast.error('Quotation created, but failed to link it to this sale. Refresh and check /quotations.');
+      }
+
+      toast.success('Quotation generated');
+      navigate(`/quotations/${quotation.id}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to generate quotation');
+    } finally {
+      setIsGeneratingQuotation(false);
     }
-
-    toast.success('Quotation generated');
-    navigate(`/quotations/${quotation.id}`);
   };
 
   return (
@@ -260,20 +324,24 @@ export default function SaleDetailPage() {
               </Button>
             )}
             {!sale.quotationId && (
-              <Button variant="outline" onClick={handleGenerateQuotation}>
+              <LoadingButton
+                variant="outline"
+                onClick={handleGenerateQuotation}
+                isLoading={isGeneratingQuotation}
+              >
                 Generate Quotation
-              </Button>
+              </LoadingButton>
             )}
             <Button variant="outline" onClick={() => navigate(`/receipts/new?from=sale&saleId=${sale.id}`)}>
-              Generate Cash Receipt
+              {existingReceipt ? 'View Receipt' : 'Generate Cash Receipt'}
             </Button>
             {isEditing ? (
               <>
-                <Button onClick={handleSave}>
+                <LoadingButton onClick={handleSave} isLoading={isSaving}>
                   <Save className="h-4 w-4" />
                   Save
-                </Button>
-                <Button variant="outline" onClick={handleCancel}>
+                </LoadingButton>
+                <Button variant="outline" onClick={handleCancel} disabled={isSaving}>
                   <X className="h-4 w-4" />
                   Cancel
                 </Button>
@@ -468,7 +536,12 @@ export default function SaleDetailPage() {
         </div>
       </div>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      <AlertDialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) setDeleteOpen(false);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Sale</AlertDialogTitle>
@@ -477,10 +550,10 @@ export default function SaleDetailPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive hover:bg-destructive/90">
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <LoadingButton variant="destructive" onClick={handleDelete} isLoading={isDeleting}>
               Delete
-            </AlertDialogAction>
+            </LoadingButton>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

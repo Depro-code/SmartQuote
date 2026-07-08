@@ -5,6 +5,7 @@ import type { Product } from '../lib/types';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
+import { LoadingButton } from '../components/ui/loading-button';
 import {
   Table,
   TableBody,
@@ -23,7 +24,6 @@ import {
 } from '../components/ui/dialog';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -39,17 +39,20 @@ import {
   Edit,
   Trash2,
   AlertTriangle,
+  AlertCircle,
   Share2,
   Download,
   ChevronLeft,
   ChevronRight,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router';
 import { useIsMobile } from '../components/ui/use-mobile';
 import { ProductShareCard } from '../components/product/ProductShareCard';
+import { ProductImage } from '../components/product/ProductImage';
 
-const PRODUCTS_PAGE_SIZE = 30;
+const PRODUCTS_PAGE_SIZE = 50;
 
 export default function ProductsPage() {
   const navigate = useNavigate();
@@ -62,6 +65,10 @@ export default function ProductsPage() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [cardProduct, setCardProduct] = useState<Product | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [isPageLoading, setIsPageLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const cardRef = useRef<HTMLDivElement | null>(null);
 
   const totalCount = filteredProducts.length;
@@ -80,11 +87,23 @@ export default function ProductsPage() {
   useEffect(() => {
     let isMounted = true;
     if (searchQuery) {
-      productsService.search(searchQuery).then((results) => {
-        if (isMounted) setFilteredProducts(results);
-      });
+      setIsSearching(true);
+      productsService
+        .search(searchQuery)
+        .then((results) => {
+          if (isMounted) setFilteredProducts(results);
+        })
+        .catch((error) => {
+          if (isMounted) {
+            toast.error(error instanceof Error ? error.message : 'Search failed. Check your connection.');
+          }
+        })
+        .finally(() => {
+          if (isMounted) setIsSearching(false);
+        });
     } else {
       setFilteredProducts(products);
+      setIsSearching(false);
     }
     return () => {
       isMounted = false;
@@ -100,7 +119,19 @@ export default function ProductsPage() {
   }, [totalPages]);
 
   const loadProducts = async () => {
-    setProducts(await productsService.getAll());
+    setIsPageLoading(true);
+    setLoadError(null);
+    try {
+      setProducts(await productsService.getAll());
+    } catch (error) {
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to load products. Check your connection and try again.',
+      );
+    } finally {
+      setIsPageLoading(false);
+    }
   };
 
   const handleEdit = (product: Product) => {
@@ -113,14 +144,20 @@ export default function ProductsPage() {
   };
 
   const confirmDelete = async () => {
-    if (deleteProductId) {
+    if (!deleteProductId) return;
+    setIsDeleting(true);
+    try {
       const success = await productsService.delete(deleteProductId);
       if (success) {
         toast.success('Product deleted successfully');
-        loadProducts();
+        await loadProducts();
       } else {
         toast.error('Failed to delete product');
       }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete product');
+    } finally {
+      setIsDeleting(false);
       setDeleteProductId(null);
     }
   };
@@ -229,11 +266,14 @@ export default function ProductsPage() {
           <div className="relative w-full sm:max-w-[420px]">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search name, SKU, or category..."
+              placeholder="Search by product name..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-9 pl-10"
+              className="h-9 pl-10 pr-9"
             />
+            {isSearching && (
+              <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span className="rounded-md border border-border bg-background px-2.5 py-1">
@@ -247,12 +287,29 @@ export default function ProductsPage() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]">
-            <Table className="min-w-[980px] border-separate border-spacing-0">
+            {isPageLoading ? (
+              <div className="flex h-[420px] items-center justify-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading products…
+              </div>
+            ) : loadError ? (
+              <div className="flex h-[420px] flex-col items-center justify-center gap-3 px-4 text-center text-muted-foreground">
+                <AlertCircle className="h-6 w-6 text-destructive" />
+                <p>{loadError}</p>
+                <Button variant="outline" size="sm" onClick={loadProducts}>
+                  Retry
+                </Button>
+              </div>
+            ) : paginatedProducts.length === 0 ? (
+              <div className="flex h-[420px] items-center justify-center text-muted-foreground">
+                No products found
+              </div>
+            ) : (
+            <Table className="min-w-[860px] border-separate border-spacing-0">
               <TableHeader className="sticky top-0 z-20 bg-card">
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Image</TableHead>
                   <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Name</TableHead>
-                  <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Category</TableHead>
                   <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Price</TableHead>
                   <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Stock</TableHead>
                   <TableHead className="border-b border-border px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">Status</TableHead>
@@ -260,27 +317,20 @@ export default function ProductsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginatedProducts.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="h-[420px] text-center text-muted-foreground">
-                      No products found
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  paginatedProducts.map((product) => {
+                {paginatedProducts.map((product) => {
                     const isOutOfStock = product.quantityInStock <= 0;
                     const isLowStock =
                       !isOutOfStock &&
                       product.reorderLevel &&
                       product.quantityInStock <= product.reorderLevel;
-                    
+
                     return (
                       <TableRow key={product.id} className="group hover:bg-muted/40">
                         <TableCell className="px-4 py-3">
-                          <img
-                            src={product.imageUrl}
-                            alt={product.name}
-                            className="h-12 w-12 rounded-md border border-border object-cover"
+                          <ProductImage
+                            imageUrl={product.imageUrl}
+                            name={product.name}
+                            className="h-12 w-12 rounded-md border border-border object-cover text-sm"
                           />
                       </TableCell>
                       <TableCell className="max-w-[380px] px-4 py-3">
@@ -292,7 +342,6 @@ export default function ProductsPage() {
                           {product.name}
                         </button>
                       </TableCell>
-                        <TableCell className="px-4 py-3 text-muted-foreground">{product.category || '-'}</TableCell>
                         <TableCell className="px-4 py-3 font-medium text-foreground">
                           {formatCurrency(product.unitPrice)}
                         </TableCell>
@@ -341,10 +390,10 @@ export default function ProductsPage() {
                         </TableCell>
                       </TableRow>
                     );
-                  })
-                )}
+                  })}
               </TableBody>
             </Table>
+            )}
           </div>
 
         <div className="border-t border-border bg-card px-4 py-3 sm:px-5">
@@ -391,7 +440,12 @@ export default function ProductsPage() {
       />
 
       {/* Delete Confirmation */}
-      <AlertDialog open={!!deleteProductId} onOpenChange={() => setDeleteProductId(null)}>
+      <AlertDialog
+        open={!!deleteProductId}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) setDeleteProductId(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Product</AlertDialogTitle>
@@ -400,10 +454,15 @@ export default function ProductsPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700">
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <LoadingButton
+              variant="destructive"
+              onClick={confirmDelete}
+              isLoading={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
               Delete
-            </AlertDialogAction>
+            </LoadingButton>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -435,6 +494,7 @@ function EditProductDialog({
   const [formData, setFormData] = useState<Partial<Product>>({});
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (product) {
@@ -445,11 +505,14 @@ function EditProductDialog({
 
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (!file) return;
+    try {
       setImageFile(file);
       const compressed = await imageService.compressImage(file);
       setImagePreview(compressed);
       setFormData((prev) => ({ ...prev, imageUrl: compressed }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to process image');
     }
   };
 
@@ -457,12 +520,23 @@ function EditProductDialog({
     e.preventDefault();
     if (!product) return;
 
-    const updated = await productsService.update(product.id, formData);
-    if (updated) {
-      toast.success('Product updated successfully');
-      onSuccess();
-    } else {
-      toast.error('Failed to update product');
+    setIsSaving(true);
+    try {
+      const updated = await productsService.update(product.id, {
+        ...formData,
+        sku: null,
+        category: null,
+      });
+      if (updated) {
+        toast.success('Product updated successfully');
+        onSuccess();
+      } else {
+        toast.error('Failed to update product');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update product');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -478,13 +552,11 @@ function EditProductDialog({
             <div className="col-span-2">
               <Label htmlFor="image">Product Image</Label>
               <div className="mt-2 flex items-center gap-4">
-                {imagePreview && (
-                  <img
-                    src={imagePreview}
-                    alt="Preview"
-                    className="h-24 w-24 rounded object-cover"
-                  />
-                )}
+                <ProductImage
+                  imageUrl={imagePreview}
+                  name={formData.name || 'Product'}
+                  className="h-24 w-24 rounded object-cover text-lg"
+                />
                 <Input
                   id="image"
                   type="file"
@@ -501,24 +573,6 @@ function EditProductDialog({
                 value={formData.name || ''}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 required
-              />
-            </div>
-
-            <div className="col-span-2 sm:col-span-1">
-              <Label htmlFor="sku">SKU</Label>
-              <Input
-                id="sku"
-                value={formData.sku || ''}
-                onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-              />
-            </div>
-
-            <div className="col-span-2 sm:col-span-1">
-              <Label htmlFor="category">Category</Label>
-              <Input
-                id="category"
-                value={formData.category || ''}
-                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
               />
             </div>
 
@@ -604,10 +658,12 @@ function EditProductDialog({
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
               Cancel
             </Button>
-            <Button type="submit">Save Changes</Button>
+            <LoadingButton type="submit" isLoading={isSaving}>
+              Save Changes
+            </LoadingButton>
           </DialogFooter>
         </form>
       </DialogContent>

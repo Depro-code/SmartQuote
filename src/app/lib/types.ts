@@ -22,8 +22,8 @@ export interface Settings {
 export interface Product {
   id: string;
   name: string;
-  sku?: string;
-  category?: string;
+  sku?: string | null;
+  category?: string | null;
   brand?: string;
   unit?: string;
   unitPrice: number;
@@ -45,7 +45,7 @@ export interface Customer {
 }
 
 export interface QuotationItem {
-  productId: string;
+  productId?: string;
   nameSnapshot: string;
   unitPriceSnapshot: number;
   quantity: number;
@@ -78,7 +78,31 @@ export interface Quotation {
 
 export type SaleType = 'CASH' | 'CREDIT';
 
+export interface CashReceiptItem {
+  description: string;
+  quantity: number | null;
+  unitPrice: number;
+  total: number;
+}
+
+export interface CashReceipt {
+  id: string;
+  receiptNumber: string;
+  saleId?: string;
+  quotationId?: string;
+  customerName: string;
+  issueDate: string;
+  items: CashReceiptItem[];
+  subTotal: number;
+  taxRate?: number;
+  taxAmount?: number;
+  grandTotal: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SaleItem {
+  productId?: string;
   description: string;
   quantity: number | null;
   unitPrice: number;

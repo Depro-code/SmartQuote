@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { DashboardLayout } from '../components/DashboardLayout';
+import { ProductImage } from '../components/product/ProductImage';
 import { customersService, productsService, quotationsService } from '../lib/services';
 import type { Customer, Product, QuotationItem } from '../lib/types';
 import { Button } from '../components/ui/button';
@@ -24,7 +25,7 @@ import {
   DialogTitle,
 } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { ArrowLeft, Calculator, CheckSquare, Plus, Search, Trash2, UserPlus } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Calculator, CheckSquare, Loader2, Plus, Search, Trash2, UserPlus } from 'lucide-react';
 
 export default function NewQuotationPage() {
   const navigate = useNavigate();
@@ -40,12 +41,16 @@ export default function NewQuotationPage() {
   const [items, setItems] = useState<QuotationItem[]>([]);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('manual');
+  const [isEditLoading, setIsEditLoading] = useState(isEditMode);
+  const [editLoadError, setEditLoadError] = useState<string | null>(null);
+  const [quoteNumberError, setQuoteNumberError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     customerName: '',
     issueDate: new Date().toISOString().split('T')[0],
     discount: '',
     taxRate: '',
+    quoteNumber: '',
   });
 
   useEffect(() => {
@@ -62,38 +67,66 @@ export default function NewQuotationPage() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!id) return;
+  const loadExistingQuotation = () => {
+    if (!id) {
+      setIsEditLoading(false);
+      return () => {};
+    }
+
     let isMounted = true;
+    setIsEditLoading(true);
+    setEditLoadError(null);
 
-    quotationsService.getById(id).then((quotation) => {
-      if (!isMounted) return;
+    quotationsService
+      .getById(id)
+      .then((quotation) => {
+        if (!isMounted) return;
 
-      if (!quotation) {
-        toast.error('Quotation not found');
-        navigate('/quotations');
-        return;
-      }
+        if (!quotation) {
+          toast.error('Quotation not found');
+          navigate('/quotations');
+          return;
+        }
 
-      if (quotation.status === 'CONFIRMED') {
-        toast.error('Confirmed quotations can only be viewed');
-        navigate(`/quotations/${quotation.id}`, { replace: true });
-        return;
-      }
+        if (quotation.status === 'CONFIRMED') {
+          toast.error('Confirmed quotations can only be viewed');
+          navigate(`/quotations/${quotation.id}`, { replace: true });
+          return;
+        }
 
-      setFormData({
-        customerName: quotation.customerName,
-        issueDate: quotation.issueDate,
-        discount: quotation.discount ? String(quotation.discount) : '',
-        taxRate: quotation.taxRate ? String(quotation.taxRate) : '',
+        setFormData({
+          customerName: quotation.customerName,
+          issueDate: quotation.issueDate,
+          discount: quotation.discount ? String(quotation.discount) : '',
+          taxRate: quotation.taxRate ? String(quotation.taxRate) : '',
+          quoteNumber: quotation.quoteNumber,
+        });
+        setSelectedCustomerId(quotation.customerId || 'manual');
+        setItems(quotation.items);
+      })
+      .catch((error) => {
+        if (!isMounted) return;
+        // Same principle as the list pages: a dropped request must not
+        // silently leave the form blank forever with no way to recover.
+        setEditLoadError(
+          error instanceof Error
+            ? error.message
+            : 'Failed to load quotation. Check your connection and try again.',
+        );
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setIsEditLoading(false);
       });
-      setSelectedCustomerId(quotation.customerId || 'manual');
-      setItems(quotation.items);
-    });
 
     return () => {
       isMounted = false;
     };
+  };
+
+  useEffect(() => {
+    const cleanup = loadExistingQuotation();
+    return cleanup;
   }, [id, navigate]);
 
   useEffect(() => {
@@ -275,6 +308,27 @@ export default function NewQuotationPage() {
       return;
     }
 
+    const trimmedQuoteNumber = formData.quoteNumber.trim();
+    setQuoteNumberError(null);
+
+    if (trimmedQuoteNumber) {
+      try {
+        const taken = await quotationsService.isQuoteNumberTaken(
+          trimmedQuoteNumber,
+          isEditMode ? id : undefined,
+        );
+        if (taken) {
+          setQuoteNumberError('That quote number is already in use. Choose a different one.');
+          return;
+        }
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : 'Failed to verify quote number. Try again.',
+        );
+        return;
+      }
+    }
+
     setLoading(true);
 
     try {
@@ -300,6 +354,7 @@ export default function NewQuotationPage() {
           taxAmount: totals.taxAmount || undefined,
           grandTotal: totals.grandTotal,
           status: existingQuotation.status,
+          quoteNumber: trimmedQuoteNumber || undefined,
         });
 
         if (!updatedQuotation) {
@@ -321,13 +376,20 @@ export default function NewQuotationPage() {
           taxRate: totals.taxRate || undefined,
           taxAmount: totals.taxAmount || undefined,
           grandTotal: totals.grandTotal,
+          quoteNumber: trimmedQuoteNumber || undefined,
         });
 
         toast.success('Quotation created successfully');
         navigate(`/quotations/${quotation.id}`);
       }
-    } catch {
-      toast.error(isEditMode ? 'Failed to update quotation' : 'Failed to create quotation');
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : isEditMode
+            ? 'Failed to update quotation'
+            : 'Failed to create quotation',
+      );
     } finally {
       setLoading(false);
     }
@@ -340,6 +402,31 @@ export default function NewQuotationPage() {
       minimumFractionDigits: 0,
     }).format(amount);
   };
+
+  if (isEditLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center gap-2 py-24 text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading quotation…
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (editLoadError) {
+    return (
+      <DashboardLayout>
+        <div className="flex flex-col items-center justify-center gap-3 py-24 text-center text-muted-foreground">
+          <AlertCircle className="h-6 w-6 text-destructive" />
+          <p>{editLoadError}</p>
+          <Button variant="outline" size="sm" onClick={loadExistingQuotation}>
+            Retry
+          </Button>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -405,6 +492,22 @@ export default function NewQuotationPage() {
                     required
                   />
                 </div>
+
+                <div>
+                  <Label htmlFor="quoteNumber">Quote Number (optional)</Label>
+                  <Input
+                    id="quoteNumber"
+                    placeholder="Leave blank to auto-generate"
+                    value={formData.quoteNumber}
+                    onChange={(e) => {
+                      setFormData({ ...formData, quoteNumber: e.target.value });
+                      if (quoteNumberError) setQuoteNumberError(null);
+                    }}
+                  />
+                  {quoteNumberError && (
+                    <p className="mt-1 text-sm text-destructive">{quoteNumberError}</p>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -436,10 +539,16 @@ export default function NewQuotationPage() {
                     </TableHeader>
                     <TableBody>
                       {items.map((item) => {
-                        const stock = getProductStock(item.productId);
+                        // Every item on this page originates from a real
+                        // selected product (see addProductToItems below) —
+                        // productId is only ever missing for quotations
+                        // generated FROM a sale, which don't go through
+                        // this form. Safe to assert here.
+                        const productId = item.productId as string;
+                        const stock = getProductStock(productId);
 
                         return (
-                          <TableRow key={item.productId}>
+                          <TableRow key={productId}>
                             <TableCell>
                               <div>
                                 <div className="font-medium">{item.nameSnapshot}</div>
@@ -454,7 +563,7 @@ export default function NewQuotationPage() {
                                 type="number"
                                 min="1"
                                 value={item.quantity}
-                                onChange={(e) => updateQuantity(item.productId, Number(e.target.value))}
+                                onChange={(e) => updateQuantity(productId, Number(e.target.value))}
                                 className="w-24"
                               />
                               {item.quantity > stock && (
@@ -469,7 +578,7 @@ export default function NewQuotationPage() {
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => removeItem(item.productId)}
+                                onClick={() => removeItem(productId)}
                               >
                                 <Trash2 className="h-4 w-4 text-red-600" />
                               </Button>
@@ -681,11 +790,14 @@ function ProductSelectionCard({
       }`}
       onClick={onClick}
     >
-      <img src={product.imageUrl} alt={product.name} className="h-16 w-16 rounded object-cover" />
+      <ProductImage
+        imageUrl={product.imageUrl}
+        name={product.name}
+        className="h-16 w-16 shrink-0 rounded object-cover text-sm"
+      />
       <div className="flex-1">
         <div className="font-medium">{product.name}</div>
         <div className="text-sm text-gray-500">
-          {product.sku && `SKU: ${product.sku} | `}
           {formatCurrency(product.unitPrice)}
           {product.unit && ` / ${product.unit}`}
         </div>

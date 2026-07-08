@@ -1,11 +1,10 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
-import { ChevronLeft, ChevronRight, Eye, Plus, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye, Loader2, Plus, Trash2, AlertCircle } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -14,6 +13,7 @@ import {
   AlertDialogTitle,
 } from '../components/ui/alert-dialog';
 import { Button } from '../components/ui/button';
+import { LoadingButton } from '../components/ui/loading-button';
 import {
   Dialog,
   DialogContent,
@@ -44,7 +44,6 @@ type SaleDialogItem = SaleItem & {
   selectedProductId?: string;
   stock?: number;
   isPickerOpen?: boolean;
-  productSearch?: string;
 };
 
 function getCurrentMonth() {
@@ -132,6 +131,9 @@ export default function SalesPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [deleteSaleId, setDeleteSaleId] = useState<string | null>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isPageLoading, setIsPageLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const sales = useMemo(
     () => {
@@ -157,7 +159,19 @@ export default function SalesPage() {
   const weekRangeLabel = getWeekRangeLabel(selectedMonth, selectedWeek);
 
   const loadSales = async () => {
-    setAllSales(await salesService.getByType(selectedMonth, activeTab));
+    setIsPageLoading(true);
+    setLoadError(null);
+    try {
+      setAllSales(await salesService.getByType(selectedMonth, activeTab));
+    } catch (error) {
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to load sales. Check your connection and try again.',
+      );
+    } finally {
+      setIsPageLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -191,14 +205,19 @@ export default function SalesPage() {
   const confirmDelete = async () => {
     if (!deleteSaleId) return;
 
-    const success = await salesService.delete(deleteSaleId);
-    if (success) {
-      toast.success('Sale transaction deleted');
-      loadSales();
-    } else {
-      toast.error('Failed to delete sale transaction');
+    setIsDeleting(true);
+    try {
+      const success = await salesService.delete(deleteSaleId);
+      if (success) {
+        toast.success('Sale transaction deleted');
+        await loadSales();
+      } else {
+        toast.error('Failed to delete sale transaction');
+      }
+    } finally {
+      setIsDeleting(false);
+      setDeleteSaleId(null);
     }
-    setDeleteSaleId(null);
   };
 
   return (
@@ -257,6 +276,24 @@ export default function SalesPage() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]">
+          {isPageLoading ? (
+            <div className="flex h-[420px] items-center justify-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading sales…
+            </div>
+          ) : loadError ? (
+            <div className="flex h-[420px] flex-col items-center justify-center gap-3 px-4 text-center text-muted-foreground">
+              <AlertCircle className="h-6 w-6 text-destructive" />
+              <p>{loadError}</p>
+              <Button variant="outline" size="sm" onClick={loadSales}>
+                Retry
+              </Button>
+            </div>
+          ) : paginatedSales.length === 0 ? (
+            <div className="flex h-[420px] items-center justify-center text-muted-foreground">
+              No sale transactions found
+            </div>
+          ) : (
           <Table className="min-w-[980px] border-separate border-spacing-0">
             <TableHeader className="sticky top-0 z-20 bg-card">
               <TableRow className="hover:bg-transparent">
@@ -270,14 +307,7 @@ export default function SalesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {paginatedSales.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="h-[420px] text-center text-muted-foreground">
-                    No sale transactions found
-                  </TableCell>
-                </TableRow>
-              ) : (
-                paginatedSales.map((sale, index) => {
+              {paginatedSales.map((sale, index) => {
                   const serialNumber = (currentPage - 1) * PAGE_SIZE + index + 1;
                   const previousSale = paginatedSales[index - 1];
                   const saleWeek = getSaleWeek(sale);
@@ -343,10 +373,10 @@ export default function SalesPage() {
                       </TableRow>
                     </Fragment>
                   );
-                })
-              )}
+                })}
             </TableBody>
           </Table>
+          )}
         </div>
 
         <div className="border-t border-border bg-card px-4 py-3 sm:px-5">
@@ -390,7 +420,12 @@ export default function SalesPage() {
         }}
       />
 
-      <AlertDialog open={!!deleteSaleId} onOpenChange={() => setDeleteSaleId(null)}>
+      <AlertDialog
+        open={!!deleteSaleId}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) setDeleteSaleId(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Sale</AlertDialogTitle>
@@ -399,10 +434,10 @@ export default function SalesPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700">
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <LoadingButton variant="destructive" onClick={confirmDelete} isLoading={isDeleting}>
               Delete
-            </AlertDialogAction>
+            </LoadingButton>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -497,38 +532,47 @@ function AddSaleDialog({
           selectedProductId: product.id,
           stock: product.quantityInStock,
           isPickerOpen: false,
-          productSearch: '',
         };
       }),
     );
   };
 
+  const [isSaving, setIsSaving] = useState(false);
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
     const saleItems = items.map((item) => ({
+      productId: item.selectedProductId,
       description: item.description.trim(),
       quantity: item.quantity,
       unitPrice: item.unitPrice,
       total: Number(item.total) || 0,
     }));
 
-    await salesService.create({
-      date,
-      customer: customer.trim(),
-      items: saleItems,
-      grandTotal,
-      type,
-      week: Number(week),
-      month: getMonthFromDate(date),
-    });
+    setIsSaving(true);
+    try {
+      await salesService.create({
+        date,
+        customer: customer.trim(),
+        items: saleItems,
+        grandTotal,
+        type,
+        week: Number(week),
+        month: getMonthFromDate(date),
+      });
 
-    toast.success('Sale transaction added');
-    onSuccess();
+      toast.success('Sale transaction added');
+      onSuccess();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to add sale transaction');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => { if (!next && isSaving) return; onOpenChange(next); }}>
       <DialogContent className="max-h-[90vh] w-[95vw] max-w-3xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add Sale</DialogTitle>
@@ -548,44 +592,54 @@ function AddSaleDialog({
             </div>
             <div className="relative">
               <Label htmlFor="sale-customer">Customer</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="sale-customer"
-                  value={customer}
-                  onChange={(event) => setCustomer(event.target.value)}
-                  required
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-9"
-                  onClick={() => setIsCustomerPickerOpen((isOpen) => !isOpen)}
-                >
-                  Pick
-                </Button>
-              </div>
-              {isCustomerPickerOpen && (
-                <div className="absolute left-0 top-full z-40 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md">
-                  {customers.length === 0 ? (
-                    <div className="px-2 py-2 text-sm text-muted-foreground">No customers found</div>
-                  ) : (
-                    customers.map((entry: Customer) => (
-                      <button
-                        key={entry.id}
-                        type="button"
-                        className="block w-full rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
-                        onClick={() => {
-                          setCustomer(entry.name);
-                          setIsCustomerPickerOpen(false);
-                        }}
-                      >
-                        {entry.name}
-                      </button>
-                    ))
-                  )}
-                </div>
-              )}
+              <Input
+                id="sale-customer"
+                value={customer}
+                onChange={(event) => {
+                  setCustomer(event.target.value);
+                  setIsCustomerPickerOpen(true);
+                }}
+                onFocus={() => setIsCustomerPickerOpen(true)}
+                onBlur={() => {
+                  // Delay so a click on a dropdown option registers first —
+                  // blur fires before the option's onClick otherwise.
+                  window.setTimeout(() => setIsCustomerPickerOpen(false), 150);
+                }}
+                placeholder="Type to search or add new"
+                autoComplete="off"
+                required
+              />
+              {isCustomerPickerOpen && (() => {
+                const query = customer.trim().toLowerCase();
+                const matches = query
+                  ? customers.filter((entry) => entry.name.toLowerCase().includes(query))
+                  : customers;
+
+                return (
+                  <div className="absolute left-0 top-full z-40 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md">
+                    {matches.length === 0 ? (
+                      <div className="px-2 py-2 text-sm text-muted-foreground">
+                        {query ? 'No matching customers — this will be added as new' : 'No customers yet'}
+                      </div>
+                    ) : (
+                      matches.map((entry: Customer) => (
+                        <button
+                          key={entry.id}
+                          type="button"
+                          className="block w-full rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            setCustomer(entry.name);
+                            setIsCustomerPickerOpen(false);
+                          }}
+                        >
+                          {entry.name}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                );
+              })()}
             </div>
             <div>
               <Label>Type</Label>
@@ -647,53 +701,64 @@ function AddSaleDialog({
                   </Button>
 
                   <div className="relative pr-10">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="w-full"
-                      onClick={() => updateItem(index, { isPickerOpen: !item.isPickerOpen })}
-                    >
-                      Pick from inventory
-                    </Button>
-                    {item.isPickerOpen && (
-                      <div className="absolute left-0 top-10 z-30 w-full rounded-md border border-border bg-popover p-2 shadow-md">
-                        <Input
-                          placeholder="Search products..."
-                          value={item.productSearch || ''}
-                          onChange={(event) => updateItem(index, { productSearch: event.target.value })}
-                          className="mb-2 h-8"
-                        />
-                        <div className="max-h-48 overflow-y-auto">
-                          {inventory
-                            .filter((product) => {
-                              const query = (item.productSearch || '').toLowerCase();
-                              return product.name.toLowerCase().includes(query) || product.sku?.toLowerCase().includes(query);
-                            })
-                            .map((product) => (
-                              <button
-                                key={product.id}
-                                type="button"
-                                className="flex w-full items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
-                                onClick={() => selectProduct(index, product)}
-                              >
-                                <span className="truncate">{product.name}</span>
-                                <span className="shrink-0 text-xs text-muted-foreground">Stock: {product.quantityInStock}</span>
-                              </button>
-                            ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
                     <Label htmlFor={`sale-item-description-${index}`}>Description</Label>
                     <Input
                       id={`sale-item-description-${index}`}
                       value={item.description}
-                      onChange={(event) => updateItem(index, { description: event.target.value })}
+                      onChange={(event) => {
+                        // Typing freely means this is no longer necessarily
+                        // the previously-picked product — clear the link so
+                        // we don't send a stale productId for edited text.
+                        updateItem(index, {
+                          description: event.target.value,
+                          selectedProductId: undefined,
+                          stock: undefined,
+                          isPickerOpen: true,
+                        });
+                      }}
+                      onFocus={() => updateItem(index, { isPickerOpen: true })}
+                      onBlur={() => {
+                        window.setTimeout(() => updateItem(index, { isPickerOpen: false }), 150);
+                      }}
+                      placeholder="Type to search inventory or enter freely"
+                      autoComplete="off"
                       required
                     />
+                    {item.isPickerOpen && (() => {
+                      const query = item.description.trim().toLowerCase();
+                      const matches = query
+                        ? inventory.filter(
+                            (product) =>
+                              product.name.toLowerCase().includes(query) ||
+                              product.sku?.toLowerCase().includes(query),
+                          )
+                        : inventory;
+
+                      return (
+                        <div className="absolute left-0 top-full z-30 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md">
+                          {matches.length === 0 ? (
+                            <div className="px-2 py-2 text-sm text-muted-foreground">
+                              No matching products — will be added as a free-text item
+                            </div>
+                          ) : (
+                            matches.map((product) => (
+                              <button
+                                key={product.id}
+                                type="button"
+                                className="flex w-full items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => selectProduct(index, product)}
+                              >
+                                <span className="truncate">{product.name}</span>
+                                <span className="shrink-0 text-xs text-muted-foreground">
+                                  Stock: {product.quantityInStock}
+                                </span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="grid grid-cols-3 gap-2">
@@ -743,10 +808,10 @@ function AddSaleDialog({
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
               Cancel
             </Button>
-            <Button type="submit">Save Sale</Button>
+            <LoadingButton type="submit" isLoading={isSaving}>Save Sale</LoadingButton>
           </DialogFooter>
         </form>
       </DialogContent>

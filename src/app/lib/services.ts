@@ -1,5 +1,7 @@
 import { supabase } from './supabaseClient';
 import type {
+  CashReceipt,
+  CashReceiptItem,
   Customer,
   Expense,
   PetitCash,
@@ -104,6 +106,7 @@ function toQuotation(row: any, items: QuotationItem[]): Quotation {
 
 function toSaleItem(row: any): SaleItem {
   return {
+    productId: row.product_id ?? undefined,
     description: row.description,
     quantity: row.quantity != null ? Number(row.quantity) : null,
     unitPrice: Number(row.unit_price),
@@ -172,7 +175,14 @@ export const authService = {
       .eq('id', session.user.id)
       .single();
 
-    if (error || !profile) return null;
+    if (error) {
+      // A failed profile lookup (dropped connection, RLS hiccup, timeout)
+      // is not the same thing as "this account has no profile". Throwing
+      // here lets the caller distinguish "retry me" from "log this
+      // person out" instead of conflating the two.
+      throw new Error(error.message || 'Failed to load your profile. Check your connection and try again.');
+    }
+    if (!profile) return null;
     return toUser(profile, session.user.email ?? '');
   },
 
@@ -343,7 +353,11 @@ export const productsService = {
 
   getLowStock: async (): Promise<Product[]> => {
     const all = await productsService.getAll();
-    return all.filter((p) => p.reorderLevel != null && p.quantityInStock <= p.reorderLevel);
+    // A product with no reorder level set was never given a restock
+    // threshold - that's not the same as "never low stock". Falling back
+    // to 0 means it's still flagged once it's genuinely out of stock,
+    // instead of being invisible to this check forever.
+    return all.filter((p) => p.quantityInStock <= (p.reorderLevel ?? 0));
   },
 
   updateStock: async (id: string, quantity: number): Promise<Product | null> => {
@@ -428,7 +442,7 @@ async function hydrateQuotation(row: any): Promise<Quotation> {
 function quotationItemsPayload(quotationId: string, items: QuotationItem[]) {
   return items.map((item, index) => ({
     quotation_id: quotationId,
-    product_id: item.productId,
+    product_id: item.productId ?? null,
     name_snapshot: item.nameSnapshot,
     unit_price_snapshot: item.unitPriceSnapshot,
     unit_snapshot: item.unitSnapshot,
@@ -436,6 +450,15 @@ function quotationItemsPayload(quotationId: string, items: QuotationItem[]) {
     line_total: item.lineTotal,
     sort_order: index,
   }));
+}
+
+// Postgres error codes worth translating into a message a non-DBA can act
+// on, instead of the raw driver text. 23505 = unique_violation.
+function friendlyDbError(error: { code?: string; message: string }, context: string): Error {
+  if (error.code === '23505') {
+    return new Error(`${context}: that number is already in use. Choose a different one.`);
+  }
+  return new Error(error.message);
 }
 
 export const quotationsService = {
@@ -454,12 +477,25 @@ export const quotationsService = {
     return data ? hydrateQuotation(data) : null;
   },
 
+  // Proactive check before insert/update, so the person sees a clear
+  // inline error instead of waiting on the 23505 unique-violation from
+  // the database (which still stands as the final safety net).
+  isQuoteNumberTaken: async (quoteNumber: string, excludeId?: string): Promise<boolean> => {
+    let query = supabase.from('quotations').select('id').eq('quote_number', quoteNumber);
+    if (excludeId) query = query.neq('id', excludeId);
+
+    const { data, error } = await query.limit(1);
+    if (error) throw new Error(error.message);
+    return (data?.length ?? 0) > 0;
+  },
+
   create: async (
-    quotation: Omit<Quotation, 'id' | 'quoteNumber' | 'createdAt' | 'updatedAt'>,
+    quotation: Omit<Quotation, 'id' | 'quoteNumber' | 'createdAt' | 'updatedAt'> & { quoteNumber?: string },
   ): Promise<Quotation> => {
     const { data: qRow, error: qError } = await supabase
       .from('quotations')
       .insert({
+        quote_number: quotation.quoteNumber || undefined,
         customer_id: quotation.customerId,
         customer_name: quotation.customerName,
         customer_phone: quotation.customerPhone,
@@ -477,16 +513,25 @@ export const quotationsService = {
       .select()
       .single();
 
-    const row = unwrap(qRow, qError);
+    if (qError) throw friendlyDbError(qError, 'Quotation number');
+    if (!qRow) throw new Error('No data returned from Supabase');
 
     if (quotation.items.length > 0) {
       const { error: itemsError } = await supabase
         .from('quotation_items')
-        .insert(quotationItemsPayload(row.id, quotation.items));
-      if (itemsError) throw new Error(itemsError.message);
+        .insert(quotationItemsPayload(qRow.id, quotation.items));
+
+      if (itemsError) {
+        // Don't leave a headerless, empty quotation behind — this exact
+        // failure mode (orphaned DRAFT with zero items) is what caused
+        // the bug where sales showed "Generate Quotation" forever because
+        // the link-back to the sale never happened either.
+        await supabase.from('quotations').delete().eq('id', qRow.id);
+        throw new Error(itemsError.message);
+      }
     }
 
-    return hydrateQuotation(row);
+    return hydrateQuotation(qRow);
   },
 
   update: async (id: string, updates: Partial<Quotation>): Promise<Quotation | null> => {
@@ -495,6 +540,7 @@ export const quotationsService = {
     if (updates.customerName !== undefined) payload.customer_name = updates.customerName;
     if (updates.customerPhone !== undefined) payload.customer_phone = updates.customerPhone;
     if (updates.customerEmail !== undefined) payload.customer_email = updates.customerEmail;
+    if (updates.quoteNumber !== undefined) payload.quote_number = updates.quoteNumber;
     if (updates.status !== undefined) payload.status = updates.status;
     if (updates.issueDate !== undefined) payload.issue_date = updates.issueDate;
     if (updates.validUntil !== undefined) payload.valid_until = updates.validUntil;
@@ -512,7 +558,7 @@ export const quotationsService = {
       .select()
       .maybeSingle();
 
-    if (error) throw new Error(error.message);
+    if (error) throw friendlyDbError(error, 'Quotation number');
     if (!data) return null;
 
     if (updates.items) {
@@ -571,9 +617,183 @@ export const quotationsService = {
 
   // Fully atomic on the DB side: decrements stock, creates the sale + its
   // items, and flips status to CONFIRMED, all in one transaction.
-  confirmQuotation: async (id: string): Promise<boolean> => {
-    const { error } = await supabase.rpc('confirm_quotation', { p_quotation_id: id });
+  confirmQuotation: async (id: string, saleType: SaleType): Promise<boolean> => {
+    const { error } = await supabase.rpc('confirm_quotation', {
+      p_quotation_id: id,
+      p_sale_type: saleType,
+    });
     return !error;
+  },
+};
+
+// =====================================================================
+// Cash receipts (+ cash_receipt_items child table)
+// Moved off localStorage — was per-browser, uncounted, and created a new
+// receipt (burning a number) every time the receipt page was revisited.
+// =====================================================================
+
+function toCashReceiptItem(row: any): CashReceiptItem {
+  return {
+    description: row.description,
+    quantity: row.quantity != null ? Number(row.quantity) : null,
+    unitPrice: Number(row.unit_price),
+    total: Number(row.total),
+  };
+}
+
+function toCashReceipt(row: any, items: CashReceiptItem[]): CashReceipt {
+  return {
+    id: row.id,
+    receiptNumber: row.receipt_number,
+    saleId: row.sale_id ?? undefined,
+    quotationId: row.quotation_id ?? undefined,
+    customerName: row.customer_name,
+    issueDate: row.issue_date,
+    items,
+    subTotal: Number(row.sub_total),
+    taxRate: row.tax_rate != null ? Number(row.tax_rate) : undefined,
+    taxAmount: row.tax_amount != null ? Number(row.tax_amount) : undefined,
+    grandTotal: Number(row.grand_total),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function cashReceiptItemsPayload(cashReceiptId: string, items: CashReceiptItem[]) {
+  return items.map((item, index) => ({
+    cash_receipt_id: cashReceiptId,
+    description: item.description,
+    quantity: item.quantity,
+    unit_price: item.unitPrice,
+    total: item.total,
+    sort_order: index,
+  }));
+}
+
+async function loadCashReceiptItems(cashReceiptId: string): Promise<CashReceiptItem[]> {
+  const { data, error } = await supabase
+    .from('cash_receipt_items')
+    .select('*')
+    .eq('cash_receipt_id', cashReceiptId)
+    .order('sort_order');
+  return unwrap(data, error).map(toCashReceiptItem);
+}
+
+async function hydrateCashReceipt(row: any): Promise<CashReceipt> {
+  const items = await loadCashReceiptItems(row.id);
+  return toCashReceipt(row, items);
+}
+
+export const receiptsService = {
+  getById: async (id: string): Promise<CashReceipt | null> => {
+    const { data, error } = await supabase.from('cash_receipts').select('*').eq('id', id).maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? hydrateCashReceipt(data) : null;
+  },
+
+  // Look up an existing receipt for a sale/quotation BEFORE creating a
+  // new one — this is what stops the "revisit the page, get a new
+  // number" bug. Call one of these first; only create() if both return null.
+  getBySaleId: async (saleId: string): Promise<CashReceipt | null> => {
+    const { data, error } = await supabase
+      .from('cash_receipts')
+      .select('*')
+      .eq('sale_id', saleId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? hydrateCashReceipt(data) : null;
+  },
+
+  getByQuotationId: async (quotationId: string): Promise<CashReceipt | null> => {
+    const { data, error } = await supabase
+      .from('cash_receipts')
+      .select('*')
+      .eq('quotation_id', quotationId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? hydrateCashReceipt(data) : null;
+  },
+
+  // A receipt may have been generated from either the sale's or the
+  // linked quotation's "Generate Cash Receipt" button. Checking only one
+  // id misses a receipt made from the other entry point, which both
+  // hides an existing receipt AND risks creating a duplicate one for the
+  // same transaction. Pass whichever id(s) are known; both get checked.
+  findExisting: async (params: { saleId?: string; quotationId?: string }): Promise<CashReceipt | null> => {
+    if (params.saleId) {
+      const bySale = await receiptsService.getBySaleId(params.saleId);
+      if (bySale) return bySale;
+    }
+    if (params.quotationId) {
+      const byQuotation = await receiptsService.getByQuotationId(params.quotationId);
+      if (byQuotation) return byQuotation;
+    }
+    return null;
+  },
+
+  // Proactive check before update, same reasoning as quotations'
+  // isQuoteNumberTaken: a clear inline error beats waiting on the DB's
+  // 23505 unique-violation, which still stands as the final safety net.
+  isReceiptNumberTaken: async (receiptNumber: string, excludeId?: string): Promise<boolean> => {
+    let query = supabase.from('cash_receipts').select('id').eq('receipt_number', receiptNumber);
+    if (excludeId) query = query.neq('id', excludeId);
+
+    const { data, error } = await query.limit(1);
+    if (error) throw new Error(error.message);
+    return (data?.length ?? 0) > 0;
+  },
+
+  update: async (id: string, receiptNumber: string): Promise<CashReceipt> => {
+    const { data, error } = await supabase
+      .from('cash_receipts')
+      .update({ receipt_number: receiptNumber })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw friendlyDbError(error, 'Receipt number');
+    if (!data) throw new Error('No data returned from Supabase');
+    return hydrateCashReceipt(data);
+  },
+
+  create: async (
+    receipt: Omit<CashReceipt, 'id' | 'receiptNumber' | 'createdAt' | 'updatedAt'> & { receiptNumber?: string },
+  ): Promise<CashReceipt> => {
+    const { data: rRow, error: rError } = await supabase
+      .from('cash_receipts')
+      .insert({
+        receipt_number: receipt.receiptNumber || undefined,
+        sale_id: receipt.saleId,
+        quotation_id: receipt.quotationId,
+        customer_name: receipt.customerName,
+        issue_date: receipt.issueDate,
+        sub_total: receipt.subTotal,
+        tax_rate: receipt.taxRate,
+        tax_amount: receipt.taxAmount,
+        grand_total: receipt.grandTotal,
+      })
+      .select()
+      .single();
+
+    if (rError) throw friendlyDbError(rError, 'Receipt number');
+    if (!rRow) throw new Error('No data returned from Supabase');
+
+    if (receipt.items.length > 0) {
+      const { error: itemsError } = await supabase
+        .from('cash_receipt_items')
+        .insert(cashReceiptItemsPayload(rRow.id, receipt.items));
+
+      if (itemsError) {
+        await supabase.from('cash_receipts').delete().eq('id', rRow.id);
+        throw new Error(itemsError.message);
+      }
+    }
+
+    return hydrateCashReceipt(rRow);
   },
 };
 
@@ -607,6 +827,18 @@ export const salesService = {
     return data ? hydrateSale(data) : null;
   },
 
+  getByQuotationId: async (quotationId: string): Promise<SaleTransaction | null> => {
+    const { data, error } = await supabase
+      .from('sales')
+      .select('*')
+      .eq('quotation_id', quotationId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? hydrateSale(data) : null;
+  },
+
   getByMonth: async (month: string): Promise<SaleTransaction[]> => {
     const { data, error } = await supabase.from('sales').select('*').eq('month', month);
     const rows = unwrap(data, error);
@@ -633,43 +865,61 @@ export const salesService = {
     return Promise.all(rows.map(hydrateSale));
   },
 
-  // Manual sale entry (not created via confirmQuotation).
+  // Manual sale entry (not created via confirmQuotation). Atomic on the
+  // DB side: creates the sale + items AND decrements stock for any item
+  // tied to a real product, same guarantee confirm_quotation gives the
+  // quotation path. Previously this did two separate client-side
+  // inserts and never touched stock at all.
   create: async (
     data: Omit<SaleTransaction, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<SaleTransaction> => {
-    const { data: row, error } = await supabase
-      .from('sales')
-      .insert({
-        sale_date: data.date,
-        customer_name: data.customer,
-        grand_total: data.grandTotal,
-        type: data.type,
-        week: data.week,
-        month: data.month,
-        quotation_id: data.quotationId,
-      })
-      .select()
-      .single();
+    const { data: saleId, error } = await supabase.rpc('create_direct_sale', {
+      p_sale_date: data.date,
+      p_customer_name: data.customer,
+      p_grand_total: data.grandTotal,
+      p_type: data.type,
+      p_week: data.week,
+      p_month: data.month,
+      p_items: data.items.map((item) => ({
+        product_id: item.productId ?? null,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        total: item.total,
+      })),
+    });
 
-    const saleRow = unwrap(row, error);
+    if (error) throw new Error(error.message);
 
-    if (data.items.length > 0) {
-      const { error: itemsError } = await supabase.from('sale_items').insert(
-        data.items.map((item) => ({
-          sale_id: saleRow.id,
-          description: item.description,
-          quantity: item.quantity,
-          unit_price: item.unitPrice,
-          total: item.total,
-        })),
-      );
-      if (itemsError) throw new Error(itemsError.message);
-    }
-
-    return hydrateSale(saleRow);
+    const created = await salesService.getById(saleId as string);
+    if (!created) throw new Error('Sale was created but could not be reloaded');
+    return created;
   },
 
   update: async (id: string, updates: Partial<SaleTransaction>): Promise<SaleTransaction | null> => {
+    // Do items first: if this fails, we bail before touching the header,
+    // so grandTotal (on the header) never ends up out of sync with items
+    // that didn't actually save. This was previously silent — updates.items
+    // was accepted by the type but never written anywhere.
+    if (updates.items !== undefined) {
+      const { error: deleteError } = await supabase.from('sale_items').delete().eq('sale_id', id);
+      if (deleteError) throw new Error(deleteError.message);
+
+      if (updates.items.length > 0) {
+        const { error: itemsError } = await supabase.from('sale_items').insert(
+          updates.items.map((item) => ({
+            sale_id: id,
+            product_id: item.productId ?? null,
+            description: item.description,
+            quantity: item.quantity,
+            unit_price: item.unitPrice,
+            total: item.total,
+          })),
+        );
+        if (itemsError) throw new Error(itemsError.message);
+      }
+    }
+
     const payload: Record<string, unknown> = {};
     if (updates.date !== undefined) payload.sale_date = updates.date;
     if (updates.customer !== undefined) payload.customer_name = updates.customer;
@@ -677,6 +927,7 @@ export const salesService = {
     if (updates.type !== undefined) payload.type = updates.type;
     if (updates.week !== undefined) payload.week = updates.week;
     if (updates.month !== undefined) payload.month = updates.month;
+    if (updates.quotationId !== undefined) payload.quotation_id = updates.quotationId;
 
     const { data, error } = await supabase
       .from('sales')

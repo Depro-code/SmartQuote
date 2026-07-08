@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import {
+  AlertCircle,
   ArrowLeft,
-  Camera,
   Download,
   Edit,
+  Loader2,
   Save,
   Share2,
   Trash2,
@@ -14,9 +15,9 @@ import {
 import { toast } from 'sonner';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { ProductShareCard } from '../components/product/ProductShareCard';
+import { ProductImage } from '../components/product/ProductImage';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -28,6 +29,7 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import { LoadingButton } from '../components/ui/loading-button';
 import { Textarea } from '../components/ui/textarea';
 import { useIsMobile } from '../components/ui/use-mobile';
 import { imageService, productsService } from '../lib/services';
@@ -35,8 +37,6 @@ import type { Product } from '../lib/types';
 
 type ProductFormState = {
   name: string;
-  sku: string;
-  category: string;
   brand: string;
   unitPrice: number;
   unit: string;
@@ -50,8 +50,6 @@ type ProductFormState = {
 function toFormState(product: Product): ProductFormState {
   return {
     name: product.name,
-    sku: product.sku || '',
-    category: product.category || '',
     brand: product.brand || '',
     unitPrice: product.unitPrice,
     unit: product.unit || '',
@@ -76,21 +74,38 @@ export default function ProductDetailPage() {
   const [stockQuantity, setStockQuantity] = useState(0);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [cardProduct, setCardProduct] = useState<Product | null>(null);
+  const [isPageLoading, setIsPageLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isUpdatingStock, setIsUpdatingStock] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
-  useEffect(() => {
+  const loadProduct = async () => {
     if (!id) return;
-    let isMounted = true;
-    productsService.getById(id).then((foundProduct) => {
-      if (!isMounted) return;
+    setIsPageLoading(true);
+    setLoadError(null);
+    try {
+      const foundProduct = await productsService.getById(id);
       setProduct(foundProduct);
       if (foundProduct) {
         setFormData(toFormState(foundProduct));
         setStockQuantity(foundProduct.quantityInStock);
       }
-    });
-    return () => {
-      isMounted = false;
-    };
+    } catch (error) {
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to load product. Check your connection and try again.',
+      );
+    } finally {
+      setIsPageLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadProduct();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const formatCurrency = (amount: number) => {
@@ -119,8 +134,8 @@ export default function ProductDetailPage() {
 
   const buildPayload = (data: ProductFormState): Partial<Product> => ({
     name: data.name.trim(),
-    sku: data.sku.trim() || undefined,
-    category: data.category.trim() || undefined,
+    sku: null,
+    category: null,
     brand: data.brand.trim() || undefined,
     unitPrice: Number(data.unitPrice) || 0,
     unit: data.unit.trim() || undefined,
@@ -133,14 +148,21 @@ export default function ProductDetailPage() {
 
   const handleSave = async () => {
     if (!id || !formData) return;
-    const updated = await productsService.update(id, buildPayload(formData));
-    if (!updated) {
-      toast.error('Failed to update product');
-      return;
+    setIsSaving(true);
+    try {
+      const updated = await productsService.update(id, buildPayload(formData));
+      if (!updated) {
+        toast.error('Failed to update product');
+        return;
+      }
+      refreshProduct(updated);
+      setIsEditing(false);
+      toast.success('Product updated');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update product');
+    } finally {
+      setIsSaving(false);
     }
-    refreshProduct(updated);
-    setIsEditing(false);
-    toast.success('Product updated');
   };
 
   const handleCancel = () => {
@@ -155,6 +177,7 @@ export default function ProductDetailPage() {
     const file = event.target.files?.[0];
     if (!file || !id || !product) return;
 
+    setIsUploadingImage(true);
     try {
       const imageUrl = await imageService.compressImage(file);
       const updated = await productsService.update(id, { imageUrl });
@@ -166,30 +189,46 @@ export default function ProductDetailPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to update image');
     } finally {
+      setIsUploadingImage(false);
       event.target.value = '';
     }
   };
 
   const handleStockUpdate = async () => {
     if (!id) return;
-    const updated = await productsService.update(id, { quantityInStock: Number(stockQuantity) || 0 });
-    if (!updated) {
-      toast.error('Failed to update stock');
-      return;
+    setIsUpdatingStock(true);
+    try {
+      const updated = await productsService.update(id, { quantityInStock: Number(stockQuantity) || 0 });
+      if (!updated) {
+        toast.error('Failed to update stock');
+        return;
+      }
+      refreshProduct(updated);
+      toast.success('Stock updated');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update stock');
+    } finally {
+      setIsUpdatingStock(false);
     }
-    refreshProduct(updated);
-    toast.success('Stock updated');
   };
 
   const handleDelete = async () => {
     if (!id) return;
-    const success = await productsService.delete(id);
-    if (!success) {
-      toast.error('Failed to delete product');
-      return;
+    setIsDeleting(true);
+    try {
+      const success = await productsService.delete(id);
+      if (!success) {
+        toast.error('Failed to delete product');
+        return;
+      }
+      toast.success('Product deleted');
+      navigate('/products');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete product');
+    } finally {
+      setIsDeleting(false);
+      setDeleteOpen(false);
     }
-    toast.success('Product deleted');
-    navigate('/products');
   };
 
   const waitForPreviewRender = async () => {
@@ -266,6 +305,31 @@ export default function ProductDetailPage() {
     }
   };
 
+  if (isPageLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex h-[420px] items-center justify-center gap-2 rounded-lg border border-border bg-card text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading product…
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <DashboardLayout>
+        <div className="flex h-[420px] flex-col items-center justify-center gap-3 rounded-lg border border-border bg-card px-4 text-center text-muted-foreground">
+          <AlertCircle className="h-6 w-6 text-destructive" />
+          <p>{loadError}</p>
+          <Button variant="outline" size="sm" onClick={loadProduct}>
+            Retry
+          </Button>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   if (!product || !formData) {
     return (
       <DashboardLayout>
@@ -315,11 +379,11 @@ export default function ProductDetailPage() {
             </Button>
             {isEditing ? (
               <>
-                <Button onClick={handleSave}>
+                <LoadingButton onClick={handleSave} isLoading={isSaving}>
                   <Save className="h-4 w-4" />
                   Save
-                </Button>
-                <Button variant="outline" onClick={handleCancel}>
+                </LoadingButton>
+                <Button variant="outline" onClick={handleCancel} disabled={isSaving}>
                   <X className="h-4 w-4" />
                   Cancel
                 </Button>
@@ -340,17 +404,11 @@ export default function ProductDetailPage() {
         <div className="grid flex-1 gap-6 overflow-auto p-4 sm:p-5 lg:grid-cols-[360px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <div className="overflow-hidden rounded-lg border border-border bg-background">
-              {product.imageUrl ? (
-                <img
-                  src={product.imageUrl}
-                  alt={product.name}
-                  className="h-[280px] w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-[280px] w-full items-center justify-center bg-muted">
-                  <Camera className="h-12 w-12 text-muted-foreground" />
-                </div>
-              )}
+              <ProductImage
+                imageUrl={product.imageUrl}
+                name={product.name}
+                className="h-[280px] w-full object-cover text-4xl"
+              />
               <div className="border-t border-border p-4">
                 <input
                   ref={fileInputRef}
@@ -359,14 +417,15 @@ export default function ProductDetailPage() {
                   className="hidden"
                   onChange={handleImageChange}
                 />
-                <Button
+                <LoadingButton
                   variant="outline"
                   className="w-full"
                   onClick={() => fileInputRef.current?.click()}
+                  isLoading={isUploadingImage}
                 >
                   <Upload className="h-4 w-4" />
                   Upload Image
-                </Button>
+                </LoadingButton>
               </div>
             </div>
 
@@ -382,8 +441,11 @@ export default function ProductDetailPage() {
                   min={0}
                   value={stockQuantity}
                   onChange={(event) => setStockQuantity(Number(event.target.value))}
+                  disabled={isUpdatingStock}
                 />
-                <Button onClick={handleStockUpdate}>Update Stock</Button>
+                <LoadingButton onClick={handleStockUpdate} isLoading={isUpdatingStock}>
+                  Update Stock
+                </LoadingButton>
               </div>
             </div>
           </aside>
@@ -399,18 +461,6 @@ export default function ProductDetailPage() {
                 <Input
                   value={formData.name}
                   onChange={(event) => setFormData({ ...formData, name: event.target.value })}
-                />
-              </DetailField>
-              <DetailField label="SKU" value={product.sku || 'Not set'} isEditing={isEditing}>
-                <Input
-                  value={formData.sku}
-                  onChange={(event) => setFormData({ ...formData, sku: event.target.value })}
-                />
-              </DetailField>
-              <DetailField label="Category" value={product.category || 'Not set'} isEditing={isEditing}>
-                <Input
-                  value={formData.category}
-                  onChange={(event) => setFormData({ ...formData, category: event.target.value })}
                 />
               </DetailField>
               <DetailField label="Brand" value={product.brand || 'Not set'} isEditing={isEditing}>
@@ -499,7 +549,12 @@ export default function ProductDetailPage() {
         </div>
       </div>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      <AlertDialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) setDeleteOpen(false);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Product</AlertDialogTitle>
@@ -508,10 +563,15 @@ export default function ProductDetailPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive hover:bg-destructive/90">
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <LoadingButton
+              variant="destructive"
+              onClick={handleDelete}
+              isLoading={isDeleting}
+              className="bg-destructive hover:bg-destructive/90"
+            >
               Delete
-            </AlertDialogAction>
+            </LoadingButton>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
